@@ -55,10 +55,19 @@ a manual walkthrough plus a scripted CDP smoke test.
      and stamp `FIJADO` once locked; the panel strip shows
      `IA:EDL0` and the live object count. Feeds without vision (or
      static) fall back to the simulated noise-walker targets.
+   - **AMBIENTE** — live CRT sliders (scanlines, glow, vignette,
+     flicker, glitch chance) plus `RÁFAGA`, a momentary heavy
+     glitch/tear burst for transitions and dramatic hits.
+   - **MENSAJE** — type a line and send it in-fiction: `REGISTRO`
+     pushes it into the activity log (Enter does the same), `ALERTA`
+     pushes it in danger red, `AVISO` blinks it as a status-bar
+     directive for a few seconds.
    - **TOMA** — `● GRABAR` records the canvas; `■ CORTAR` stops and
-     auto-downloads `os-take-<timestamp>.webm`. Also `Ctrl+G`. A blinking
-     REC badge shows while rolling. Only the canvas is captured — the
-     panel and badge never appear in footage.
+     auto-downloads a numbered take (`os-toma-01-<timestamp>.webm`).
+     Also `Ctrl+G`. Each take opens with a 1.6 s burned-in slate (take
+     number, OS, wall clock) and a blinking REC badge shows while
+     rolling. `FOTO` downloads a PNG still. Only the canvas is captured
+     — the panel and badge never appear in footage.
    - `Ctrl+H` hides/shows the panel (shortcuts stay live while hidden).
 4. Resize the window — the current phase re-lays out for the new size.
 
@@ -72,6 +81,11 @@ __os.setPhase('desktop')   // 'boot' | 'login' | 'desktop'
 __os.cycleTheme()          // or setTheme('amber'), getThemeKey()
 __os.useWebcam('cam-b')    // or loadVideoFile(file, 'cam-a'), clearFeed()
 __os.setVision(false)      // toggle detection/tracking; isVisionOn()
+__os.setCrt({ glitchChance: 0.1 })  // live ambience; getCrt()
+__os.glitchBurst()         // momentary tear burst (default 0.7s)
+__os.logLine('SUJETO LOCALIZADO', 'danger')  // into the activity log
+__os.announce('TOQUE DE QUEDA 21:00')        // status-bar directive
+__os.screenshot()          // PNG still of the canvas
 __os.startRecording(); __os.isRecording(); __os.stopRecording()
 __os.restart()
 

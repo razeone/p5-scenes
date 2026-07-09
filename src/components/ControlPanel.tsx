@@ -3,7 +3,8 @@
  *
  * Not part of the fiction: a collapsible strip for staging takes —
  * jump phases, switch color themes live, pipe video files / webcam into
- * the surveillance slots, and record the canvas to a WebM take. Only the
+ * the surveillance slots, dial the CRT ambience, inject log lines and
+ * status-bar directives, and capture stills / WebM takes. Only the
  * canvas is captured, so the panel never shows up in footage; hide it
  * with the ⨯ or Ctrl+H anyway if it distracts.
  */
@@ -11,7 +12,20 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CamSlot, OSController } from '../os/OSApp'
 import type { OSPhase } from '../os/core/SceneManager'
+import type { OSConfig } from '../os/config/config'
 import { PALETTES, PALETTE_ORDER, type PaletteKey } from '../os/config/theme'
+
+type CrtKey = keyof OSConfig['crt']
+
+// Slider bank for the CRT ambience. glitchChance is a per-frame
+// probability, so its usable range is far below 1.
+const CRT_SLIDERS: { key: CrtKey; label: string; max: number }[] = [
+  { key: 'scanlineIntensity', label: 'LÍNEAS', max: 1 },
+  { key: 'glow', label: 'BRILLO', max: 1 },
+  { key: 'vignette', label: 'VIÑETA', max: 1 },
+  { key: 'flicker', label: 'TEMBLOR', max: 1 },
+  { key: 'glitchChance', label: 'GLITCH', max: 0.15 },
+]
 
 interface Props {
   controller: OSController
@@ -31,8 +45,27 @@ export default function ControlPanel({
   vision,
 }: Props) {
   const [hidden, setHidden] = useState(false)
+  const [crt, setCrt] = useState(() => controller.getCrt())
+  const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const slotRef = useRef<CamSlot>('cam-a')
+
+  const slide = (key: CrtKey, value: number) => {
+    setCrt((c) => ({ ...c, [key]: value }))
+    controller.setCrt({ [key]: value })
+  }
+
+  const sendLog = (level: 'info' | 'danger') => {
+    if (!msg.trim()) return
+    controller.logLine(msg.trim(), level)
+    setMsg('')
+  }
+
+  const sendTicker = () => {
+    if (!msg.trim()) return
+    controller.announce(msg.trim())
+    setMsg('')
+  }
 
   // Ctrl+H toggles the panel; Ctrl+G toggles recording; Ctrl+1..5 themes.
   // These stay live while the panel is hidden (hooks run before the
@@ -141,6 +174,50 @@ export default function ControlPanel({
       </div>
 
       <div className="ctrl-row">
+        <span className="ctrl-label">AMBIENTE</span>
+        {CRT_SLIDERS.map(({ key, label, max }) => (
+          <label key={key} className="ctrl-slider" title={label}>
+            <span>{label}</span>
+            <input
+              type="range"
+              min={0}
+              max={max}
+              step={max / 100}
+              value={crt[key]}
+              onChange={(e) => slide(key, Number(e.target.value))}
+            />
+          </label>
+        ))}
+        <button type="button" onClick={() => controller.glitchBurst()}>
+          RÁFAGA
+        </button>
+      </div>
+
+      <div className="ctrl-row">
+        <span className="ctrl-label">MENSAJE</span>
+        <input
+          type="text"
+          className="ctrl-text"
+          placeholder="texto para registro / aviso…"
+          value={msg}
+          maxLength={80}
+          onChange={(e) => setMsg(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') sendLog('info')
+          }}
+        />
+        <button type="button" onClick={() => sendLog('info')}>
+          REGISTRO
+        </button>
+        <button type="button" onClick={() => sendLog('danger')}>
+          ALERTA
+        </button>
+        <button type="button" onClick={sendTicker}>
+          AVISO
+        </button>
+      </div>
+
+      <div className="ctrl-row">
         <span className="ctrl-label">VISIÓN</span>
         <button
           type="button"
@@ -162,6 +239,9 @@ export default function ControlPanel({
           }
         >
           {recording ? '■ CORTAR' : '● GRABAR'}
+        </button>
+        <button type="button" onClick={() => controller.screenshot()}>
+          FOTO
         </button>
         {recording && <span className="ctrl-note">grabando lienzo…</span>}
       </div>

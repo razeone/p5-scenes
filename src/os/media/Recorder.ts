@@ -22,6 +22,11 @@ function pickMime(): string | undefined {
   return MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m))
 }
 
+/** Filesystem-safe local timestamp, shared by take/photo filenames. */
+export function timestampSlug(): string {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+}
+
 export class CanvasRecorder {
   /** Reflects start/stop so the React shell can track state. */
   onStateChange?: (recording: boolean) => void
@@ -33,7 +38,7 @@ export class CanvasRecorder {
     return this.recorder?.state === 'recording'
   }
 
-  start(canvas: HTMLCanvasElement, fps = 60): void {
+  start(canvas: HTMLCanvasElement, fps = 60, baseName = 'os-take'): void {
     if (this.recorder) return
     const stream = canvas.captureStream(fps)
     const mimeType = pickMime()
@@ -52,7 +57,7 @@ export class CanvasRecorder {
       this.chunks = []
       for (const t of stream.getTracks()) t.stop()
       this.recorder = null
-      this.download(blob)
+      this.download(blob, baseName)
       this.onStateChange?.(false)
     }
     recorder.start(1000) // chunk every second so long takes survive a crash
@@ -66,14 +71,10 @@ export class CanvasRecorder {
     }
   }
 
-  private download(blob: Blob): void {
-    const stamp = new Date()
-      .toISOString()
-      .slice(0, 19)
-      .replace(/[:T]/g, '-')
+  private download(blob: Blob, baseName: string): void {
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `os-take-${stamp}.webm`
+    a.download = `${baseName}-${timestampSlug()}.webm`
     a.click()
     // Give the browser a beat to grab the blob before releasing it.
     setTimeout(() => URL.revokeObjectURL(a.href), 5000)

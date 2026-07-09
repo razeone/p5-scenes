@@ -12,7 +12,7 @@
  */
 
 import p5 from 'p5'
-import { CONFIG } from './config/config'
+import { CONFIG, type OSConfig } from './config/config'
 import { PALETTES, PALETTE_ORDER, type PaletteKey } from './config/theme'
 import type { OSContext } from './core/context'
 import { SceneManager, type OSPhase } from './core/SceneManager'
@@ -26,8 +26,10 @@ import { RadarWindow } from './widgets/RadarWindow'
 import { StatusBar } from './widgets/StatusBar'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
-import { CanvasRecorder } from './media/Recorder'
+import { CanvasRecorder, timestampSlug } from './media/Recorder'
 import { VisionEngine } from './vision/VisionEngine'
+import { Slate } from './widgets/Slate'
+import type { LogLevel } from './widgets/TextStream'
 
 /** Panel slots the director can pipe video into. */
 export type CamSlot = 'cam-a' | 'cam-b'
@@ -50,6 +52,17 @@ export interface OSController {
   /** Toggle real object detection/tracking on the video feeds. */
   setVision(on: boolean): void
   isVisionOn(): boolean
+  /** Live CRT ambience: scanlines, glow, vignette, flicker, glitch. */
+  setCrt(patch: Partial<OSConfig['crt']>): void
+  getCrt(): OSConfig['crt']
+  /** Momentary heavy glitch/tear burst (scene transitions, hits). */
+  glitchBurst(seconds?: number): void
+  /** Push a line into the activity log (desktop phase). */
+  logLine(text: string, level?: LogLevel): void
+  /** Blinking directive in the status bar for a few seconds. */
+  announce(text: string, seconds?: number): void
+  /** Download a PNG still of the canvas. */
+  screenshot(): void
   /** Start capturing the canvas to a WebM take. */
   startRecording(): void
   /** Cut: finalize the take and auto-download it. */
@@ -74,10 +87,12 @@ export function createOSApp(
   const scene = new SceneManager()
 
   // The single mutable context object, refreshed each frame.
+  // config.crt is a session-local copy so the director can slide values
+  // live without mutating the module-level defaults.
   const ctx: OSContext = {
     p: null as unknown as p5,
     palette: PALETTES[themeKey],
-    config: CONFIG,
+    config: { ...CONFIG, crt: { ...CONFIG.crt } },
     width: container.clientWidth || 1280,
     height: container.clientHeight || 720,
     t: 0,
@@ -131,12 +146,36 @@ export function createOSApp(
       drawBackground(ctx)
       scene.update(ctx)
       scene.draw(ctx)
+
+      // Director-triggered glitch burst: spike the post pass briefly.
+      const crt = ctx.config.crt
+      const bursting = ctx.t < glitchBurstUntil
+      let saved: { glitchChance: number; flicker: number } | null = null
+      if (bursting) {
+        saved = { glitchChance: crt.glitchChance, flicker: crt.flicker }
+        crt.glitchChance = 0.85
+        crt.flicker = Math.max(crt.flicker, 0.6)
+      }
       applyPost(ctx)
+      if (saved) {
+        crt.glitchChance = saved.glitchChance
+        crt.flicker = saved.flicker
+      }
     }
 
     // Keyboard → focused entity (login fields, etc.).
     // keyTyped gets printable characters; keyPressed handles the rest.
+    // When a DOM input has focus (director panel text field), stand down
+    // entirely — returning false there would preventDefault the typing.
+    const typingInDom = () => {
+      const el = document.activeElement
+      return (
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+      )
+    }
+
     p.keyTyped = () => {
+      if (typingInDom()) return true
       if (typeof p.key === 'string' && p.key.length === 1) {
         scene.dispatchKey(ctx, p.key)
       }
@@ -144,6 +183,7 @@ export function createOSApp(
     }
 
     p.keyPressed = () => {
+      if (typingInDom()) return true
       if (p.key === 'Enter' || p.key === 'Backspace') {
         scene.dispatchKey(ctx, p.key)
         return false
@@ -231,7 +271,9 @@ export function createOSApp(
     const M = 16 // outer margin / gutter
     const top = 34 + M // below the status bar
 
-    scene.add(new StatusBar(), ctx)
+    const bar = new StatusBar()
+    bar.id = 'status'
+    scene.add(bar, ctx)
 
     // Column widths: log | 2× surveillance | telemetry+radar.
     const logW = Math.max(300, W * 0.24)
@@ -240,18 +282,17 @@ export function createOSApp(
     const colH = H - top - M
 
     // Left: activity log.
-    scene.add(
-      new ConsoleWindow({
-        x: M,
-        y: top,
-        w: logW,
-        h: colH,
-        title: `${CONFIG.agencyCode} // REGISTRO`,
-        tag: 'LIVE',
-        revealTime: 0.6,
-      }),
-      ctx,
-    )
+    const log = new ConsoleWindow({
+      x: M,
+      y: top,
+      w: logW,
+      h: colH,
+      title: `${CONFIG.agencyCode} // REGISTRO`,
+      tag: 'LIVE',
+      revealTime: 0.6,
+    })
+    log.id = 'log'
+    scene.add(log, ctx)
 
     // Middle: two stacked surveillance feeds.
     const feedH = (colH - M) / 2
@@ -329,6 +370,8 @@ export function createOSApp(
   // Vision is a mode, not a per-feed switch: new video feeds pick it up
   // automatically so the director toggles it once for the whole desk.
   let visionOn = true
+  let glitchBurstUntil = 0
+  let take = 0
 
   function panelFor(slot: CamSlot): SurveillancePanel | undefined {
     const e = scene.get(slot)
@@ -376,8 +419,38 @@ export function createOSApp(
     clearFeed: (slot = 'cam-a') => swapFeed(slot, new StaticFeed()),
     setVision: (on) => setVision(on),
     isVisionOn: () => visionOn,
+    setCrt: (patch) => {
+      Object.assign(ctx.config.crt, patch)
+    },
+    getCrt: () => ({ ...ctx.config.crt }),
+    glitchBurst: (seconds = 0.7) => {
+      glitchBurstUntil = ctx.t + seconds
+    },
+    logLine: (text, level = 'info') => {
+      const e = scene.get('log')
+      if (e instanceof ConsoleWindow) {
+        e.stream.log(ctx, text.toUpperCase(), level)
+      }
+    },
+    announce: (text, seconds = 8) => {
+      const e = scene.get('status')
+      if (e instanceof StatusBar) e.announce(text, seconds)
+    },
+    screenshot: () => {
+      canvasEl?.toBlob((blob) => {
+        if (!blob) return
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `os-foto-${timestampSlug()}.png`
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+      }, 'image/png')
+    },
     startRecording: () => {
-      if (canvasEl) recorder.start(canvasEl)
+      if (!canvasEl || recorder.recording) return
+      take++
+      scene.add(new Slate(take), ctx)
+      recorder.start(canvasEl, 60, `os-toma-${String(take).padStart(2, '0')}`)
     },
     stopRecording: () => recorder.stop(),
     isRecording: () => recorder.recording,
