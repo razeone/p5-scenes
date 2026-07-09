@@ -5,8 +5,13 @@
  * extends this. It draws the bracket-cornered frame, a title bar with
  * the agency code and status dots, and hands subclasses a padded inner
  * Rect via drawBody(). Optional boot-in reveal so windows can animate on.
+ *
+ * Windows are draggable by their title bar (OSApp owns the mouse and
+ * calls titleBarContains/moveBy) and carry a `focused` flag the frame
+ * renders brighter, so the actor can rearrange the desk mid-take.
  */
 
+import type p5 from 'p5'
 import { Entity } from '../core/Entity'
 import type { OSContext } from '../core/context'
 import { fillHex, strokeHex } from '../core/context'
@@ -35,6 +40,10 @@ export abstract class OSWindow extends Entity {
   title: string
   tag?: string
   accentKey: NonNullable<OSWindowOpts['accentKey']>
+  /** Title-bar dragging enabled (director/actor can rearrange). */
+  draggable = true
+  /** Last-touched window; frame renders brighter. */
+  focused = false
   private revealTime: number
   private born = -1
 
@@ -65,6 +74,27 @@ export abstract class OSWindow extends Entity {
     return { x: this.x, y: this.y, w: this.w, h: this.h }
   }
 
+  contains(px: number, py: number): boolean {
+    return (
+      px >= this.x && px <= this.x + this.w && py >= this.y && py <= this.y + this.h
+    )
+  }
+
+  titleBarContains(px: number, py: number): boolean {
+    return (
+      px >= this.x &&
+      px <= this.x + this.w &&
+      py >= this.y &&
+      py <= this.y + this.titleBarH
+    )
+  }
+
+  /** Drag delta, clamped so the title bar can never leave the canvas. */
+  moveBy(dx: number, dy: number, canvasW: number, canvasH: number): void {
+    this.x = Math.min(Math.max(this.x + dx, -this.w + 80), canvasW - 80)
+    this.y = Math.min(Math.max(this.y + dy, 0), canvasH - this.titleBarH)
+  }
+
   /** Subclasses render their content inside this padded rect. */
   protected abstract drawBody(ctx: OSContext, inner: Rect): void
 
@@ -84,9 +114,9 @@ export abstract class OSWindow extends Entity {
     fillHex(p, ctx.palette.bg, 220)
     p.rect(r.x, r.y, r.w, r.h)
 
-    // Frame + bracket corners.
-    enableGlow(ctx, a, 0.6)
-    strokeHex(p, a, 220)
+    // Frame + bracket corners — brighter when this window is focused.
+    enableGlow(ctx, a, this.focused ? 0.9 : 0.5)
+    strokeHex(p, a, this.focused ? 255 : 190)
     p.strokeWeight(1)
     p.noFill()
     p.rect(r.x, r.y, r.w, r.h)
@@ -110,11 +140,16 @@ export abstract class OSWindow extends Entity {
       p.circle(r.x + 12 + i * 12, dotY, 5)
     }
 
-    // Title text.
+    // Title text, truncated so it never collides with the tag.
     fillHex(p, a)
     p.textSize(12)
     p.textAlign(p.LEFT, p.CENTER)
-    p.text(this.title.toUpperCase(), r.x + 54, dotY + 1)
+    const tagW = this.tag ? p.textWidth(this.tag.toUpperCase()) + 24 : 10
+    p.text(
+      truncate(p, this.title.toUpperCase(), r.w - 54 - tagW),
+      r.x + 54,
+      dotY + 1,
+    )
 
     // Right-side tag.
     if (this.tag) {
@@ -140,6 +175,8 @@ export abstract class OSWindow extends Entity {
     p.pop()
   }
 
+  static truncate = truncate
+
   private brackets(ctx: OSContext, r: Rect, color: string): void {
     const { p } = ctx
     const L = 14
@@ -157,4 +194,18 @@ export abstract class OSWindow extends Entity {
       p.line(cx, cy, cx, cy + L * sy)
     }
   }
+}
+
+/** Cut text with an ellipsis to fit maxW at the current text size. */
+function truncate(p: p5, text: string, maxW: number): string {
+  if (maxW <= 0) return ''
+  if (p.textWidth(text) <= maxW) return text
+  let lo = 0
+  let hi = text.length
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (p.textWidth(text.slice(0, mid) + '…') <= maxW) lo = mid
+    else hi = mid - 1
+  }
+  return text.slice(0, lo) + '…'
 }

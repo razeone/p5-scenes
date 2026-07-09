@@ -24,6 +24,14 @@ import { TelemetryWindow } from './widgets/TelemetryWindow'
 import { SurveillancePanel } from './widgets/SurveillancePanel'
 import { RadarWindow } from './widgets/RadarWindow'
 import { StatusBar } from './widgets/StatusBar'
+import { OSWindow } from './widgets/OSWindow'
+import { MapWindow } from './widgets/MapWindow'
+import {
+  ScopeWindow,
+  SpectrogramWindow,
+  GaugeArrayWindow,
+} from './widgets/SensorWindows'
+import { CallWindow } from './widgets/CallWindow'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
 import { CanvasRecorder, timestampSlug } from './media/Recorder'
@@ -31,8 +39,8 @@ import { VisionEngine } from './vision/VisionEngine'
 import { Slate } from './widgets/Slate'
 import type { LogLevel } from './widgets/TextStream'
 
-/** Panel slots the director can pipe video into. */
-export type CamSlot = 'cam-a' | 'cam-b'
+/** Slots the director can pipe video into (panels + the call's self tile). */
+export type CamSlot = 'cam-a' | 'cam-b' | 'call-self'
 
 export interface OSController {
   setTheme(key: PaletteKey): void
@@ -192,6 +200,59 @@ export function createOSApp(
     }
 
     p.windowResized = () => syncSize()
+
+    // --- Window dragging (title-bar grab, bring-to-front on any press).
+    // Events over the DOM control panel are ignored — p5 listens on the
+    // whole window, so we gate on the event target being the canvas.
+    let dragWin: OSWindow | null = null
+
+    const windowAt = (
+      x: number,
+      y: number,
+      titleOnly: boolean,
+    ): OSWindow | null => {
+      const all = scene.all
+      for (let i = all.length - 1; i >= 0; i--) {
+        const e = all[i]
+        if (!(e instanceof OSWindow) || !e.visible) continue
+        if (titleOnly ? e.titleBarContains(x, y) : e.contains(x, y)) return e
+      }
+      return null
+    }
+
+    const setFocused = (win: OSWindow | null) => {
+      for (const e of scene.all) {
+        if (e instanceof OSWindow) e.focused = e === win
+      }
+    }
+
+    p.mousePressed = (event?: object) => {
+      if (event instanceof MouseEvent && event.target !== canvasEl) return
+      const hit = windowAt(p.mouseX, p.mouseY, false)
+      if (!hit) return
+      scene.bringToFront(hit)
+      setFocused(hit)
+      if (hit.draggable && hit.titleBarContains(p.mouseX, p.mouseY)) {
+        dragWin = hit
+        if (canvasEl) canvasEl.style.cursor = 'grabbing'
+      }
+    }
+
+    p.mouseDragged = () => {
+      dragWin?.moveBy(p.movedX, p.movedY, ctx.width, ctx.height)
+    }
+
+    p.mouseReleased = () => {
+      dragWin = null
+      if (canvasEl) canvasEl.style.cursor = ''
+    }
+
+    p.mouseMoved = (event?: object) => {
+      if (dragWin || !canvasEl) return
+      if (event instanceof MouseEvent && event.target !== canvasEl) return
+      const over = windowAt(p.mouseX, p.mouseY, true)
+      canvasEl.style.cursor = over?.draggable ? 'grab' : ''
+    }
   }
 
   /**
@@ -238,8 +299,25 @@ export function createOSApp(
       case 'desktop':
         buildDesktop()
         break
+      case 'map':
+        buildMap()
+        break
+      case 'sensors':
+        buildSensors()
+        break
+      case 'call':
+        buildCall()
+        break
     }
     hooks.onPhaseChange?.(phase)
+  }
+
+  /** Shared top strip + the content area below it. */
+  function addStatusBar(): { top: number; M: number } {
+    const bar = new StatusBar()
+    bar.id = 'status'
+    scene.add(bar, ctx)
+    return { top: 34 + 16, M: 16 }
   }
 
   function buildBoot(): void {
@@ -268,12 +346,7 @@ export function createOSApp(
   function buildDesktop(): void {
     const W = ctx.width
     const H = ctx.height
-    const M = 16 // outer margin / gutter
-    const top = 34 + M // below the status bar
-
-    const bar = new StatusBar()
-    bar.id = 'status'
-    scene.add(bar, ctx)
+    const { top, M } = addStatusBar()
 
     // Column widths: log | 2× surveillance | telemetry+radar.
     const logW = Math.max(300, W * 0.24)
@@ -355,6 +428,163 @@ export function createOSApp(
     )
   }
 
+  function buildMap(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const rightW = Math.max(280, W * 0.24)
+    const colH = H - top - M
+
+    scene.add(
+      new MapWindow({
+        x: M,
+        y: top,
+        w: W - rightW - M * 3,
+        h: colH,
+        title: `${CONFIG.agencyCode} // MAPA TÁCTICO — DISTRITO CENTRO`,
+        tag: 'S-7/S-11',
+        revealTime: 0.6,
+      }),
+      ctx,
+    )
+
+    const rx = W - rightW - M
+    const logH = colH * 0.55
+    const log = new ConsoleWindow({
+      x: rx,
+      y: top,
+      w: rightW,
+      h: logH,
+      title: 'MOVIMIENTOS',
+      tag: 'LIVE',
+      revealTime: 0.8,
+    })
+    log.id = 'log'
+    scene.add(log, ctx)
+    scene.add(
+      new RadarWindow({
+        x: rx,
+        y: top + logH + M,
+        w: rightW,
+        h: colH - logH - M,
+        title: 'RASTREO AÉREO',
+        tag: 'DRON-3',
+        revealTime: 1.0,
+      }),
+      ctx,
+    )
+  }
+
+  function buildSensors(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const leftW = Math.max(320, W * 0.3)
+    const rightW = Math.max(280, W * 0.24)
+    const midW = W - leftW - rightW - M * 4
+
+    // Left: three stacked scopes.
+    const scopeH = (colH - M * 2) / 3
+    const kinds = [
+      ['seismic', 'RED SÍSMICA'],
+      ['acoustic', 'MICRÓFONOS URBANOS'],
+      ['rf', 'INTERCEPCIÓN RF'],
+    ] as const
+    kinds.forEach(([kind, title], i) => {
+      scene.add(
+        new ScopeWindow(
+          {
+            x: M,
+            y: top + i * (scopeH + M),
+            w: leftW,
+            h: scopeH,
+            title,
+            tag: `CH-${i * 2 + 1}/${i * 2 + 2}`,
+            revealTime: 0.5 + i * 0.15,
+          },
+          kind,
+        ),
+        ctx,
+      )
+    })
+
+    // Middle: spectrogram over gauge array.
+    const specH = colH * 0.55
+    scene.add(
+      new SpectrogramWindow({
+        x: M * 2 + leftW,
+        y: top,
+        w: midW,
+        h: specH,
+        title: 'ESPECTRO — BARRIDO SIGINT',
+        tag: '0–500MHZ',
+        accentKey: 'accent',
+        revealTime: 0.7,
+      }),
+      ctx,
+    )
+    scene.add(
+      new GaugeArrayWindow({
+        x: M * 2 + leftW,
+        y: top + specH + M,
+        w: midW,
+        h: colH - specH - M,
+        title: 'AMBIENTE URBANO',
+        tag: 'NODO-4471',
+        revealTime: 0.9,
+      }),
+      ctx,
+    )
+
+    // Right: sensor event log.
+    const rx = W - rightW - M
+    const log = new ConsoleWindow({
+      x: rx,
+      y: top,
+      w: rightW,
+      h: colH,
+      title: 'EVENTOS DE SENSOR',
+      tag: 'LIVE',
+      revealTime: 1.0,
+    })
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
+  function buildCall(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const sideW = Math.max(260, W * 0.2)
+
+    const call = new CallWindow({
+      x: M,
+      y: top,
+      w: W - sideW - M * 3,
+      h: colH,
+      title: `${CONFIG.agencyCode} // CONFERENCIA SEGURA — NIVEL OMEGA`,
+      tag: 'CIFRADO',
+      revealTime: 0.5,
+    })
+    call.id = 'call'
+    scene.add(call, ctx)
+
+    const rx = W - sideW - M
+    const log = new ConsoleWindow({
+      x: rx,
+      y: top,
+      w: sideW,
+      h: colH,
+      title: 'ACTA DE SESIÓN',
+      tag: 'REC',
+      revealTime: 0.8,
+    })
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
   const instance = new p5(sketch, container)
 
   function applyTheme(key: PaletteKey) {
@@ -378,15 +608,33 @@ export function createOSApp(
     return e instanceof SurveillancePanel ? e : undefined
   }
 
+  /** Anything that can display a feed: surveillance panels + call tile. */
+  function holderFor(
+    slot: CamSlot,
+  ): SurveillancePanel | CallWindow | undefined {
+    if (slot === 'call-self') {
+      const e = scene.get('call')
+      return e instanceof CallWindow ? e : undefined
+    }
+    return panelFor(slot)
+  }
+
   function swapFeed(slot: CamSlot, feed: VideoFeed | StaticFeed): void {
-    const panel = panelFor(slot)
-    if (!panel) {
+    const holder = holderFor(slot)
+    if (!holder) {
       if (feed instanceof VideoFeed) feed.dispose()
       return
     }
-    if (panel.feed instanceof VideoFeed) panel.feed.dispose()
-    if (feed instanceof VideoFeed && visionOn) feed.vision = new VisionEngine()
-    panel.setFeed(feed)
+    if (holder.feed instanceof VideoFeed) holder.feed.dispose()
+    // Vision only runs on surveillance panels — the call tile is a mirror.
+    if (
+      feed instanceof VideoFeed &&
+      visionOn &&
+      holder instanceof SurveillancePanel
+    ) {
+      feed.vision = new VisionEngine()
+    }
+    holder.setFeed(feed)
   }
 
   function setVision(on: boolean): void {
@@ -476,6 +724,16 @@ export function createOSApp(
         const f = panelFor(slot)?.feed
         return f instanceof VideoFeed ? (f.vision?.tracks ?? null) : null
       },
+      windows: () =>
+        scene.all
+          .filter((e): e is OSWindow => e instanceof OSWindow)
+          .map((w) => ({
+            title: w.title,
+            x: Math.round(w.x),
+            y: Math.round(w.y),
+            z: w.z,
+            focused: w.focused,
+          })),
     }
   }
 

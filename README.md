@@ -6,9 +6,15 @@ surveillance desktop, while a director stages takes from an off-camera
 control panel. React (Vite) hosts the canvas and the director UI; all the
 fiction is drawn in p5 instance mode.
 
-The performance runs in three phases: **boot** (BIOS/POST roll) →
-**login** (interactive terminal, real typing) → **desktop** (activity log,
-two surveillance feeds, telemetry, radar).
+The performance opens with **boot** (BIOS/POST roll) → **login**
+(interactive terminal, real typing), then the director can stage any of
+four desks: **vigilancia** (activity log, dual camera feeds, telemetry,
+radar), **mapa** (tactical city map — procedural street grid, sector
+boundaries, restricted zone, patrol units, target ping), **sensores**
+(seismic/acoustic/RF scopes, SIGINT spectrogram waterfall, environmental
+gauges), and **llamada** (encrypted videoconference — real webcam in the
+local tile, procedural "decrypted video" participants). Every window is
+draggable by its title bar and raises on click.
 
 The surveillance feeds have **real computer vision**: MediaPipe Tasks
 Vision (WASM, GPU-accelerated) runs EfficientDet-Lite0 object detection
@@ -43,10 +49,15 @@ a manual walkthrough plus a scripted CDP smoke test.
    wrong credentials → ACCESS DENIED, then it resets). Enter submits each
    field.
 3. On the desktop, exercise the director panel (bottom right):
-   - **ESCENA** — jump straight to any phase for retakes.
+   - **ESCENA** — jump straight to any scene for retakes: BOOT, LOGIN,
+     VIGILANCIA, MAPA, SENSORES, LLAMADA.
+   - **Windows drag** — grab any window by its title bar (cursor shows
+     a grab hand); it raises above the others and gets a brighter
+     focused frame. Positions reset on scene change/resize.
    - **TEMA** — five palettes, switchable live (also `Ctrl+1..5`).
-   - **VIDEO** — pipe a video file or the webcam into CAM slot A/B;
-     LIMPIAR drops back to static. Dragging a video file anywhere onto
+   - **VIDEO** — pipe a video file or the webcam into CAM slot A/B, or
+     your webcam into the videocall's local tile (WEBCAM→LLAMADA);
+     LIMPIAR drops everything back. Dragging a video file anywhere onto
      the canvas also feeds CAM-A.
    - **VISIÓN** — toggles object detection/tracking on the video feeds
      (also `Ctrl+I`; on by default). With footage of people, vehicles,
@@ -91,6 +102,7 @@ __os.restart()
 
 __osDebug.visionStatus('cam-a')  // 'loading' | 'active' | 'error'
 __osDebug.tracks('cam-a')        // live TrackedObject[] (video px coords)
+__osDebug.windows()              // window positions / z-order / focus
 ```
 
 ### Scripted smoke tests
@@ -151,13 +163,34 @@ src/
     media/   FeedSource (static), VideoSource (file/webcam), Recorder
     vision/  VisionEngine (MediaPipe detector), ObjectTracker (IoU
              tracking w/ velocity coasting), labels (ES + threat tiers)
-    widgets/ OSWindow (base chrome) + BootSequence, LoginWindow,
-             ConsoleWindow, TelemetryWindow, SurveillancePanel,
-             RadarWindow, StatusBar, Meters, TextStream
+    widgets/ OSWindow (base chrome, dragging) + BootSequence,
+             LoginWindow, ConsoleWindow, TelemetryWindow,
+             SurveillancePanel, RadarWindow, StatusBar, Meters,
+             TextStream, Slate, MapWindow, SensorWindows (scopes,
+             spectrogram, gauges), CallWindow
 public/
   mediapipe/wasm/            self-hosted MediaPipe WASM runtime
   models/                    efficientdet_lite0.tflite (COCO, f16)
 ```
+
+## UX QA audit (applied)
+
+A polish pass over both surfaces, with every finding fixed in place:
+
+- **Canvas** — windows drag by their title bar with `grab`/`grabbing`
+  cursors and raise on any click; the focused window draws a brighter,
+  glowier frame; drag positions clamp so a title bar can never leave the
+  canvas; window titles truncate with an ellipsis instead of colliding
+  with the corner tag.
+- **Panel** — `:focus-visible` rings on every control for keyboard use;
+  the icon-only close button has an `aria-label`; `Escape` blurs the
+  message field (handing the keyboard back to the OS); buttons get a
+  0.12 s hover transition and a 1 px press-down; the panel scrolls
+  inside the viewport instead of overflowing on short windows; the
+  drop-target overlay fades in instead of popping.
+- **Input routing** — p5's global key handlers stand down while a DOM
+  input is focused, so panel typing can't leak into the login terminal
+  (and vice versa).
 
 Vision data flow: `SurveillancePanel` calls `VisionEngine.update()`
 every draw with the feed's `<video>`; the engine runs MediaPipe

@@ -35,7 +35,14 @@ interface Props {
   vision: boolean
 }
 
-const PHASES: OSPhase[] = ['boot', 'login', 'desktop']
+const PHASES: { id: OSPhase; label: string }[] = [
+  { id: 'boot', label: 'BOOT' },
+  { id: 'login', label: 'LOGIN' },
+  { id: 'desktop', label: 'VIGILANCIA' },
+  { id: 'map', label: 'MAPA' },
+  { id: 'sensors', label: 'SENSORES' },
+  { id: 'call', label: 'LLAMADA' },
+]
 
 export default function ControlPanel({
   controller,
@@ -111,6 +118,7 @@ export default function ControlPanel({
           type="button"
           className="ctrl-x"
           title="Ocultar (Ctrl+H)"
+          aria-label="Ocultar panel de dirección (Ctrl+H)"
           onClick={() => setHidden(true)}
         >
           ⨯
@@ -119,14 +127,14 @@ export default function ControlPanel({
 
       <div className="ctrl-row">
         <span className="ctrl-label">ESCENA</span>
-        {PHASES.map((ph) => (
+        {PHASES.map(({ id, label }) => (
           <button
             type="button"
-            key={ph}
-            className={ph === phase ? 'on' : ''}
-            onClick={() => controller.setPhase(ph)}
+            key={id}
+            className={id === phase ? 'on' : ''}
+            onClick={() => controller.setPhase(id)}
           >
-            {ph.toUpperCase()}
+            {label}
           </button>
         ))}
       </div>
@@ -164,9 +172,17 @@ export default function ControlPanel({
         </button>
         <button
           type="button"
+          title="Tu webcam en la videollamada (escena LLAMADA)"
+          onClick={() => void controller.useWebcam('call-self')}
+        >
+          WEBCAM→LLAMADA
+        </button>
+        <button
+          type="button"
           onClick={() => {
             controller.clearFeed('cam-a')
             controller.clearFeed('cam-b')
+            controller.clearFeed('call-self')
           }}
         >
           LIMPIAR
@@ -204,6 +220,8 @@ export default function ControlPanel({
           onChange={(e) => setMsg(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') sendLog('info')
+            // Escape hands the keyboard back to the OS canvas.
+            if (e.key === 'Escape') e.currentTarget.blur()
           }}
         />
         <button type="button" onClick={() => sendLog('info')}>
@@ -247,8 +265,9 @@ export default function ControlPanel({
       </div>
 
       <div className="ctrl-hint">
-        arrastra un video al lienzo → CAM-A · Ctrl+1..{PALETTE_ORDER.length}{' '}
-        temas · Ctrl+G grabar · Ctrl+I visión · Ctrl+H ocultar
+        arrastra ventanas por su barra de título · video al lienzo → CAM-A ·
+        Ctrl+1..{PALETTE_ORDER.length} temas · Ctrl+G grabar · Ctrl+I visión ·
+        Ctrl+H ocultar
       </div>
 
       <input

@@ -9,7 +9,13 @@
 import type { OSContext } from './context'
 import { isKeyTarget, type Entity, type KeyTarget } from './Entity'
 
-export type OSPhase = 'boot' | 'login' | 'desktop'
+export type OSPhase =
+  | 'boot'
+  | 'login'
+  | 'desktop'
+  | 'map'
+  | 'sensors'
+  | 'call'
 
 export class SceneManager {
   private entities: Entity[] = []
@@ -44,6 +50,21 @@ export class SceneManager {
 
   get(id: string): Entity | undefined {
     return this.entities.find((e) => e.id === id)
+  }
+
+  /** All entities in draw order (bottom first). Read-only. */
+  get all(): readonly Entity[] {
+    return this.entities
+  }
+
+  /** Raise an entity above everything else (window click/drag). */
+  bringToFront(e: Entity): void {
+    if (this.entities.length === 0) return
+    const maxZ = Math.max(...this.entities.map((x) => x.z))
+    if (e.z <= maxZ) {
+      e.z = maxZ + 1
+      this.entities.sort((a, b) => a.z - b.z)
+    }
   }
 
   clear(): void {
