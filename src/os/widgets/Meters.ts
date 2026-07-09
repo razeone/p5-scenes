@@ -12,6 +12,8 @@ import type { Rect } from '../core/geometry'
 
 export class BarMeter {
   label: string
+  /** Director-applied offset (alarms). Added to the noise walk. */
+  bias = 0
   private seed: number
   private value = 0.5
 
@@ -22,7 +24,7 @@ export class BarMeter {
 
   update(ctx: OSContext): void {
     // Random walk in [0,1] via noise.
-    this.value = ctx.p.noise(this.seed, ctx.t * 0.35)
+    this.value = clamp(ctx.p.noise(this.seed, ctx.t * 0.35) + this.bias, 0, 1)
   }
 
   draw(ctx: OSContext, r: Rect): void {
@@ -96,6 +98,8 @@ export class Waveform {
 
 export class RadialGauge {
   label: string
+  /** Director-applied offset (alarms). Added to the noise walk. */
+  bias = 0
   private seed: number
   private value = 0.5
   constructor(label: string, seed = Math.random() * 1000) {
@@ -103,7 +107,11 @@ export class RadialGauge {
     this.seed = seed
   }
   update(ctx: OSContext): void {
-    this.value = ctx.p.noise(this.seed + 10, ctx.t * 0.3)
+    this.value = clamp(
+      ctx.p.noise(this.seed + 10, ctx.t * 0.3) + this.bias,
+      0,
+      1,
+    )
   }
   draw(ctx: OSContext, r: Rect): void {
     const { p } = ctx

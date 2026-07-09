@@ -37,6 +37,8 @@ interface Unit {
   hostile: boolean
 }
 
+export type MapMode = 'patrol' | 'chase'
+
 export class MapWindow extends OSWindow {
   private base: p5.Graphics | null = null
   private baseKey = ''
@@ -45,10 +47,56 @@ export class MapWindow extends OSWindow {
   private hLines: number[] = []
   private target = { x: 0.62, y: 0.38 }
   private seed: number
+  /** patrol: wander the grid. chase: converge on the target. */
+  mode: MapMode = 'patrol'
 
   constructor(o: OSWindowOpts, seed = 20260708) {
     super(o)
     this.seed = seed
+  }
+
+  /** Relocate the target ping (director: "the subject moved"). */
+  newTarget(): void {
+    this.target = {
+      x: 0.1 + Math.random() * 0.8,
+      y: 0.1 + Math.random() * 0.8,
+    }
+    if (this.mode === 'chase') this.retask()
+  }
+
+  addUnit(): void {
+    if (this.units.length >= 14) return
+    const i = this.units.length
+    this.units.push({
+      x: Math.random(),
+      y: Math.random(),
+      tx: Math.random(),
+      ty: Math.random(),
+      speed: 0.008 + Math.random() * 0.014,
+      label: `UNIDAD-${i + 3}`,
+      hostile: false,
+    })
+    if (this.mode === 'chase') this.retask()
+  }
+
+  removeUnit(): void {
+    // Keep at least the two suspects on the board.
+    const i = this.units.map((u) => u.hostile).lastIndexOf(false)
+    if (i >= 0) this.units.splice(i, 1)
+  }
+
+  setMode(mode: MapMode): void {
+    this.mode = mode
+    if (mode === 'chase') this.retask()
+  }
+
+  /** Point every friendly unit's waypoint near the target. */
+  private retask(): void {
+    for (const u of this.units) {
+      if (u.hostile) continue
+      u.tx = this.target.x + (Math.random() - 0.5) * 0.08
+      u.ty = this.target.y + (Math.random() - 0.5) * 0.08
+    }
   }
 
   /** Streets + units derive from the seed; geometry is size-agnostic. */
@@ -150,10 +198,11 @@ export class MapWindow extends OSWindow {
     bound.setAlpha(150)
     g.stroke(bound)
     g.strokeWeight(1)
-    g.drawingContext.setLineDash([6, 6])
+    const gdc = g.drawingContext as CanvasRenderingContext2D
+    gdc.setLineDash([6, 6])
     g.noFill()
     g.rect(X(0.55), Y(0.12), X(0.4), Y(0.34))
-    g.drawingContext.setLineDash([])
+    gdc.setLineDash([])
     const hatch = g.color(pal.danger)
     hatch.setAlpha(60)
     g.stroke(hatch)
@@ -176,9 +225,15 @@ export class MapWindow extends OSWindow {
       const dy = u.ty - u.y
       const d = Math.hypot(dx, dy)
       if (d < 0.01) {
-        // Next waypoint: snap to a random street intersection.
-        u.tx = this.vLines[Math.floor(rnd() * this.vLines.length)]
-        u.ty = this.hLines[Math.floor(rnd() * this.hLines.length)]
+        if (this.mode === 'chase' && !u.hostile) {
+          // Hold position near the target, adjusting slightly.
+          u.tx = this.target.x + (ctx.p.random() - 0.5) * 0.06
+          u.ty = this.target.y + (ctx.p.random() - 0.5) * 0.06
+        } else {
+          // Next waypoint: snap to a random street intersection.
+          u.tx = this.vLines[Math.floor(rnd() * this.vLines.length)]
+          u.ty = this.hLines[Math.floor(rnd() * this.hLines.length)]
+        }
       } else {
         // Manhattan movement: one axis at a time, like street traffic.
         const step = u.speed * ctx.dt * 60 * 0.016
@@ -253,7 +308,11 @@ export class MapWindow extends OSWindow {
     fillHex(p, palette.fgDim, 200)
     p.textSize(9)
     p.textAlign(p.LEFT, p.BOTTOM)
-    p.text('ESC 1:2500', inner.x + 4, inner.y + inner.h - 4)
+    p.text(
+      `ESC 1:2500 · MODO: ${this.mode === 'chase' ? 'PERSECUCIÓN' : 'PATRULLA'} · UNIDADES: ${this.units.length}`,
+      inner.x + 4,
+      inner.y + inner.h - 4,
+    )
     p.textAlign(p.RIGHT, p.BOTTOM)
     p.text(
       `${(19.43 + this.target.y).toFixed(4)}N ${(99.13 + this.target.x).toFixed(4)}W`,

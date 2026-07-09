@@ -42,6 +42,31 @@ import type { LogLevel } from './widgets/TextStream'
 /** Slots the director can pipe video into (panels + the call's self tile). */
 export type CamSlot = 'cam-a' | 'cam-b' | 'call-self'
 
+/**
+ * One-shot scene-specific direction cues. Each acts on the widgets of
+ * the current scene (no-ops elsewhere), so the panel can show only the
+ * controls that matter for what's on screen.
+ */
+export type SceneAction =
+  // vigilancia
+  | 'cam-mark'
+  | 'targets-up'
+  | 'targets-down'
+  // mapa
+  | 'map-new-target'
+  | 'map-chase'
+  | 'map-patrol'
+  | 'map-add-unit'
+  | 'map-remove-unit'
+  // sensores
+  | 'sensor-quake'
+  | 'sensor-transmission'
+  | 'sensor-chem'
+  // llamada
+  | 'call-next-speaker'
+  | 'call-drop'
+  | 'call-reconnect'
+
 export interface OSController {
   setTheme(key: PaletteKey): void
   cycleTheme(dir?: number): void
@@ -69,6 +94,8 @@ export interface OSController {
   logLine(text: string, level?: LogLevel): void
   /** Blinking directive in the status bar for a few seconds. */
   announce(text: string, seconds?: number): void
+  /** Fire a scene-specific direction cue (see SceneAction). */
+  trigger(action: SceneAction): void
   /** Download a PNG still of the canvas. */
   screenshot(): void
   /** Start capturing the canvas to a WebM take. */
@@ -435,18 +462,17 @@ export function createOSApp(
     const rightW = Math.max(280, W * 0.24)
     const colH = H - top - M
 
-    scene.add(
-      new MapWindow({
-        x: M,
-        y: top,
-        w: W - rightW - M * 3,
-        h: colH,
-        title: `${CONFIG.agencyCode} // MAPA TÁCTICO — DISTRITO CENTRO`,
-        tag: 'S-7/S-11',
-        revealTime: 0.6,
-      }),
-      ctx,
-    )
+    const map = new MapWindow({
+      x: M,
+      y: top,
+      w: W - rightW - M * 3,
+      h: colH,
+      title: `${CONFIG.agencyCode} // MAPA TÁCTICO — DISTRITO CENTRO`,
+      tag: 'S-7/S-11',
+      revealTime: 0.6,
+    })
+    map.id = 'map'
+    scene.add(map, ctx)
 
     const rx = W - rightW - M
     const logH = colH * 0.55
@@ -492,50 +518,47 @@ export function createOSApp(
       ['rf', 'INTERCEPCIÓN RF'],
     ] as const
     kinds.forEach(([kind, title], i) => {
-      scene.add(
-        new ScopeWindow(
-          {
-            x: M,
-            y: top + i * (scopeH + M),
-            w: leftW,
-            h: scopeH,
-            title,
-            tag: `CH-${i * 2 + 1}/${i * 2 + 2}`,
-            revealTime: 0.5 + i * 0.15,
-          },
-          kind,
-        ),
-        ctx,
+      const scope = new ScopeWindow(
+        {
+          x: M,
+          y: top + i * (scopeH + M),
+          w: leftW,
+          h: scopeH,
+          title,
+          tag: `CH-${i * 2 + 1}/${i * 2 + 2}`,
+          revealTime: 0.5 + i * 0.15,
+        },
+        kind,
       )
+      scope.id = `scope-${kind}`
+      scene.add(scope, ctx)
     })
 
     // Middle: spectrogram over gauge array.
     const specH = colH * 0.55
-    scene.add(
-      new SpectrogramWindow({
-        x: M * 2 + leftW,
-        y: top,
-        w: midW,
-        h: specH,
-        title: 'ESPECTRO — BARRIDO SIGINT',
-        tag: '0–500MHZ',
-        accentKey: 'accent',
-        revealTime: 0.7,
-      }),
-      ctx,
-    )
-    scene.add(
-      new GaugeArrayWindow({
-        x: M * 2 + leftW,
-        y: top + specH + M,
-        w: midW,
-        h: colH - specH - M,
-        title: 'AMBIENTE URBANO',
-        tag: 'NODO-4471',
-        revealTime: 0.9,
-      }),
-      ctx,
-    )
+    const spec = new SpectrogramWindow({
+      x: M * 2 + leftW,
+      y: top,
+      w: midW,
+      h: specH,
+      title: 'ESPECTRO — BARRIDO SIGINT',
+      tag: '0–500MHZ',
+      accentKey: 'accent',
+      revealTime: 0.7,
+    })
+    spec.id = 'spectrogram'
+    scene.add(spec, ctx)
+    const gauges = new GaugeArrayWindow({
+      x: M * 2 + leftW,
+      y: top + specH + M,
+      w: midW,
+      h: colH - specH - M,
+      title: 'AMBIENTE URBANO',
+      tag: 'NODO-4471',
+      revealTime: 0.9,
+    })
+    gauges.id = 'gauges'
+    scene.add(gauges, ctx)
 
     // Right: sensor event log.
     const rx = W - rightW - M
@@ -606,6 +629,88 @@ export function createOSApp(
   function panelFor(slot: CamSlot): SurveillancePanel | undefined {
     const e = scene.get(slot)
     return e instanceof SurveillancePanel ? e : undefined
+  }
+
+  function widgetById<T>(
+    id: string,
+    cls: abstract new (...args: never[]) => T,
+  ): T | undefined {
+    const e = scene.get(id)
+    return e instanceof cls ? e : undefined
+  }
+
+  /**
+   * Scene-cue dispatch. Every case resolves its widgets by id, so cues
+   * fired in the wrong scene simply find nothing and no-op. Log lines
+   * sell the event in the on-screen record.
+   */
+  function runAction(action: SceneAction): void {
+    const log = (text: string, level: LogLevel = 'info') =>
+      controller.logLine(text, level)
+    switch (action) {
+      // --- vigilancia --------------------------------------------------
+      case 'cam-mark':
+        widgetById('cam-a', SurveillancePanel)?.flashMark()
+        log('COINCIDENCIA BIOMÉTRICA CONFIRMADA — EXPEDIENTE 4471', 'danger')
+        break
+      case 'targets-up':
+      case 'targets-down': {
+        const d = action === 'targets-up' ? 1 : -1
+        for (const slot of ['cam-a', 'cam-b'] as const) {
+          const panel = panelFor(slot)
+          panel?.setTargetCount(panel.targetCount + d)
+        }
+        log(d > 0 ? 'NUEVO SUJETO EN CUADRO — RASTREANDO' : 'SUJETO FUERA DE CUADRO', d > 0 ? 'warn' : 'dim')
+        break
+      }
+      // --- mapa --------------------------------------------------------
+      case 'map-new-target':
+        widgetById('map', MapWindow)?.newTarget()
+        log('POSICIÓN DEL OBJETIVO RETRIANGULADA', 'warn')
+        break
+      case 'map-chase':
+        widgetById('map', MapWindow)?.setMode('chase')
+        log('ORDEN EMITIDA: CONVERGER SOBRE EL OBJETIVO', 'danger')
+        break
+      case 'map-patrol':
+        widgetById('map', MapWindow)?.setMode('patrol')
+        log('UNIDADES DE VUELTA A PATRULLA', 'ok')
+        break
+      case 'map-add-unit':
+        widgetById('map', MapWindow)?.addUnit()
+        log('UNIDAD ADICIONAL DESPLEGADA', 'info')
+        break
+      case 'map-remove-unit':
+        widgetById('map', MapWindow)?.removeUnit()
+        log('UNIDAD RETIRADA DEL SECTOR', 'dim')
+        break
+      // --- sensores ----------------------------------------------------
+      case 'sensor-quake':
+        widgetById('scope-seismic', ScopeWindow)?.excite()
+        log('EVENTO SÍSMICO DETECTADO — MAGNITUD EN ANÁLISIS', 'danger')
+        break
+      case 'sensor-transmission':
+        widgetById('scope-rf', ScopeWindow)?.excite()
+        widgetById('spectrogram', SpectrogramWindow)?.burst()
+        log('TRANSMISIÓN NO REGISTRADA EN BANDA VIGILADA', 'warn')
+        break
+      case 'sensor-chem':
+        widgetById('gauges', GaugeArrayWindow)?.alarm()
+        log('UMBRAL QUÍMICO SUPERADO — NODO-4471', 'danger')
+        break
+      // --- llamada -----------------------------------------------------
+      case 'call-next-speaker':
+        widgetById('call', CallWindow)?.nextSpeaker()
+        break
+      case 'call-drop':
+        widgetById('call', CallWindow)?.dropSignal()
+        log('ENLACE DEGRADADO — REINTENTANDO', 'warn')
+        break
+      case 'call-reconnect':
+        widgetById('call', CallWindow)?.reconnect()
+        log('RENEGOCIANDO SESIÓN CIFRADA', 'info')
+        break
+    }
   }
 
   /** Anything that can display a feed: surveillance panels + call tile. */
@@ -684,6 +789,7 @@ export function createOSApp(
       const e = scene.get('status')
       if (e instanceof StatusBar) e.announce(text, seconds)
     },
+    trigger: (action) => runAction(action),
     screenshot: () => {
       canvasEl?.toBlob((blob) => {
         if (!blob) return

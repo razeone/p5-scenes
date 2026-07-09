@@ -31,7 +31,12 @@ export class CallWindow extends OSWindow {
   /** Local tile source; swapped by the director ('call-self'). */
   feed: FeedSource | null = null
   private participants: Participant[]
-  private born = -1
+  // (OSWindow keeps its own private `born` for the reveal animation.)
+  private connectedAt = -1
+  /** Director-forced speaker (0..3, 3 = local); null = auto rotation. */
+  private speakerOverride: number | null = null
+  private dropFor = 0
+  private dropUntil = -1
 
   constructor(o: OSWindowOpts) {
     super(o)
@@ -47,10 +52,28 @@ export class CallWindow extends OSWindow {
     this.feed = feed
   }
 
+  /** Hand the floor to the next participant (wraps; includes you). */
+  nextSpeaker(): void {
+    this.speakerOverride = ((this.speakerOverride ?? -1) + 1) % 4
+  }
+
+  /** Signal degradation burst: tiles tear, then recover. */
+  dropSignal(seconds = 3): void {
+    this.dropFor = seconds
+    this.dropUntil = -1
+  }
+
+  /** Tear the call down and run the handshake again. */
+  reconnect(): void {
+    this.connectedAt = -1
+    this.speakerOverride = null
+    this.dropUntil = -1
+  }
+
   protected drawBody(ctx: OSContext, inner: Rect): void {
     const { p, palette } = ctx
-    if (this.born < 0) this.born = ctx.t
-    const el = ctx.t - this.born
+    if (this.connectedAt < 0) this.connectedAt = ctx.t
+    const el = ctx.t - this.connectedAt
 
     const chromeH = 22
     const stripH = 30
@@ -93,8 +116,10 @@ export class CallWindow extends OSWindow {
     const gap = 8
     const tw = (grid.w - gap) / 2
     const th = (grid.h - gap) / 2
-    // Speaking rotates across everyone (index 3 = the local operator).
-    const speaking = Math.floor(ctx.p.noise(ctx.t * 0.18) * 8) % 4
+    // Speaking rotates across everyone (index 3 = the local operator),
+    // unless the director has forced the floor.
+    const speaking =
+      this.speakerOverride ?? Math.floor(ctx.p.noise(ctx.t * 0.18) * 8) % 4
     this.participants.forEach((pp, i) => {
       const tile: Rect = {
         x: grid.x + (i % 2) * (tw + gap),
@@ -107,8 +132,39 @@ export class CallWindow extends OSWindow {
     const selfTile: Rect = { x: grid.x + tw + gap, y: grid.y + th + gap, w: tw, h: th }
     this.drawSelfTile(ctx, selfTile, speaking === 3)
 
+    // Director-triggered signal degradation.
+    if (this.dropFor > 0) {
+      this.dropUntil = ctx.t + this.dropFor
+      this.dropFor = 0
+    }
+    if (ctx.t < this.dropUntil) this.drawSignalDrop(ctx, grid)
+
     this.drawStrip(ctx, inner, stripH, true)
     p.pop()
+  }
+
+  /** Heavy interference over the whole grid while the link "recovers". */
+  private drawSignalDrop(ctx: OSContext, grid: Rect): void {
+    const { p, palette } = ctx
+    // Horizontal tears sampled from the call area itself.
+    for (let i = 0; i < 6; i++) {
+      const ty = grid.y + p.random(grid.h - 12)
+      const th2 = p.random(3, 14)
+      p.copy(grid.x, ty, grid.w, th2, grid.x + p.random(-30, 30), ty, grid.w, th2)
+    }
+    p.noStroke()
+    p.fill(0, 0, 0, 90 + p.noise(ctx.t * 9) * 60)
+    p.rect(grid.x, grid.y, grid.w, grid.h)
+    if (Math.floor(ctx.t * 3) % 2 === 0) {
+      fillHex(p, palette.warn, 240)
+      p.textSize(13)
+      p.textAlign(p.CENTER, p.CENTER)
+      p.text(
+        '⚠ SEÑAL INESTABLE — RECUPERANDO ENLACE ⚠',
+        grid.x + grid.w / 2,
+        grid.y + grid.h / 2,
+      )
+    }
   }
 
   // --- Pieces ------------------------------------------------------------

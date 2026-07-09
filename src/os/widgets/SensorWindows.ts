@@ -62,6 +62,8 @@ const SCOPE_PRESETS: Record<ScopeKind, { labels: string[]; gen: (p: p5, t: numbe
 export class ScopeWindow extends OSWindow {
   private channels: Channel[]
   private kind: ScopeKind
+  private exciteFor = 0
+  private exciteUntil = -1
 
   constructor(o: OSWindowOpts, kind: ScopeKind) {
     super(o)
@@ -75,10 +77,26 @@ export class ScopeWindow extends OSWindow {
     }))
   }
 
+  /** Director trigger: drive the traces hard for a few seconds. */
+  excite(seconds = 4): void {
+    this.exciteFor = seconds
+    this.exciteUntil = -1
+  }
+
   update(ctx: OSContext): void {
+    if (this.exciteFor > 0) {
+      this.exciteUntil = ctx.t + this.exciteFor
+      this.exciteFor = 0
+    }
+    // Event envelope: ramps in fast, rings down toward the end.
+    let gain = 1
+    if (ctx.t < this.exciteUntil) {
+      const remain = this.exciteUntil - ctx.t
+      gain = 1 + Math.min(2.6, remain) * (1.1 + ctx.p.noise(ctx.t * 5) * 0.6)
+    }
     const gen = SCOPE_PRESETS[this.kind].gen
     for (const ch of this.channels) {
-      ch.buf.push(gen(ctx.p, ctx.t, ch.seed))
+      ch.buf.push(gen(ctx.p, ctx.t, ch.seed) * gain)
       if (ch.buf.length > 260) ch.buf.shift()
     }
   }
@@ -135,6 +153,16 @@ export class ScopeWindow extends OSWindow {
 export class SpectrogramWindow extends OSWindow {
   private buf: p5.Graphics | null = null
   private bufKey = ''
+  private burstFor = 0
+  private burstUntil = -1
+  private burstFreq = 0.4
+
+  /** Director trigger: a strong new transmission band appears. */
+  burst(seconds = 5): void {
+    this.burstFor = seconds
+    this.burstUntil = -1
+    this.burstFreq = 0.3 + Math.random() * 0.45
+  }
 
   private ensureBuf(ctx: OSContext, r: Rect): p5.Graphics {
     const key = `${Math.round(r.w)}x${Math.round(r.h)}`
@@ -163,9 +191,17 @@ export class SpectrogramWindow extends OSWindow {
       // narrow persistent bands that fade in and out.
       const f = b / bins
       let v = p.noise(b * 0.35, ctx.t * 2.2) * (1 - f * 0.55) * 0.5
-      const band =
+      let band =
         Math.exp(-Math.pow((f - 0.22) * 22, 2)) * (p.noise(3.3, ctx.t * 0.5) > 0.4 ? 1 : 0) +
         Math.exp(-Math.pow((f - 0.61) * 30, 2)) * (p.noise(8.8, ctx.t * 0.35) > 0.55 ? 1 : 0)
+      // Director-triggered transmission: wide, hot, impossible to miss.
+      if (this.burstFor > 0) {
+        this.burstUntil = ctx.t + this.burstFor
+        this.burstFor = 0
+      }
+      if (ctx.t < this.burstUntil) {
+        band += Math.exp(-Math.pow((f - this.burstFreq) * 14, 2)) * 1.4
+      }
       v = Math.min(1, v + band * (0.55 + 0.45 * p.noise(b, ctx.t * 4)))
       const col = v > 0.55 ? hot : warm
       col.setAlpha(Math.pow(v, 1.4) * 255)
@@ -198,6 +234,14 @@ export class SpectrogramWindow extends OSWindow {
 export class GaugeArrayWindow extends OSWindow {
   private gauges: RadialGauge[]
   private bars: BarMeter[]
+  private alarmFor = 0
+  private alarmUntil = -1
+
+  /** Director trigger: chemical/particle readings spike into the red. */
+  alarm(seconds = 6): void {
+    this.alarmFor = seconds
+    this.alarmUntil = -1
+  }
 
   constructor(o: OSWindowOpts) {
     super(o)
@@ -215,6 +259,15 @@ export class GaugeArrayWindow extends OSWindow {
   }
 
   update(ctx: OSContext): void {
+    if (this.alarmFor > 0) {
+      this.alarmUntil = ctx.t + this.alarmFor
+      this.alarmFor = 0
+    }
+    // Chemical + particulates ramp toward the red, then bleed off.
+    const active = ctx.t < this.alarmUntil
+    const bias = active ? 0.45 + ctx.p.noise(ctx.t * 3) * 0.15 : 0
+    this.gauges[1].bias = bias // químico
+    this.bars[0].bias = bias * 0.9 // partículas
     for (const gauge of this.gauges) gauge.update(ctx)
     for (const bar of this.bars) bar.update(ctx)
   }

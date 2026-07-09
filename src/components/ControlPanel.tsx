@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import type { CamSlot, OSController } from '../os/OSApp'
+import type { CamSlot, OSController, SceneAction } from '../os/OSApp'
 import type { OSPhase } from '../os/core/SceneManager'
 import type { OSConfig } from '../os/config/config'
 import { PALETTES, PALETTE_ORDER, type PaletteKey } from '../os/config/theme'
@@ -33,6 +33,35 @@ interface Props {
   phase: OSPhase
   recording: boolean
   vision: boolean
+}
+
+// One-shot cues per scene; the row only shows what the current scene
+// can respond to (see SceneAction in OSApp).
+const SCENE_ACTIONS: Partial<
+  Record<OSPhase, { id: SceneAction; label: string; title?: string }[]>
+> = {
+  desktop: [
+    { id: 'cam-mark', label: 'IDENTIFICAR', title: 'Banner "sujeto identificado" en CAM-A' },
+    { id: 'targets-up', label: '+SUJETO', title: 'Más objetivos simulados en cuadro' },
+    { id: 'targets-down', label: '−SUJETO', title: 'Menos objetivos simulados en cuadro' },
+  ],
+  map: [
+    { id: 'map-new-target', label: 'MOVER OBJETIVO' },
+    { id: 'map-chase', label: 'PERSECUCIÓN', title: 'Las unidades convergen sobre el objetivo' },
+    { id: 'map-patrol', label: 'PATRULLA', title: 'Las unidades vuelven a rondar' },
+    { id: 'map-add-unit', label: '+UNIDAD' },
+    { id: 'map-remove-unit', label: '−UNIDAD' },
+  ],
+  sensors: [
+    { id: 'sensor-quake', label: 'SISMO', title: 'Dispara la red sísmica' },
+    { id: 'sensor-transmission', label: 'TRANSMISIÓN', title: 'Banda caliente en el espectro + RF' },
+    { id: 'sensor-chem', label: 'ALERTA QUÍMICA', title: 'Medidores químicos al rojo' },
+  ],
+  call: [
+    { id: 'call-next-speaker', label: 'CAMBIAR VOZ', title: 'Pasa la palabra al siguiente' },
+    { id: 'call-drop', label: 'CAÍDA DE SEÑAL' },
+    { id: 'call-reconnect', label: 'RECONECTAR', title: 'Rehace el handshake de la llamada' },
+  ],
 }
 
 const PHASES: { id: OSPhase; label: string }[] = [
@@ -138,6 +167,22 @@ export default function ControlPanel({
           </button>
         ))}
       </div>
+
+      {SCENE_ACTIONS[phase] && (
+        <div className="ctrl-row">
+          <span className="ctrl-label">CUES</span>
+          {SCENE_ACTIONS[phase]!.map(({ id, label, title }) => (
+            <button
+              type="button"
+              key={id}
+              title={title}
+              onClick={() => controller.trigger(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="ctrl-row">
         <span className="ctrl-label">TEMA</span>

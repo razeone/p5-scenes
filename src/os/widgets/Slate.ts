@@ -14,11 +14,13 @@ export class Slate extends Entity {
   z = 100
   private born = -1
 
-  constructor(
-    private take: number,
-    private lifetime = 1.6,
-  ) {
+  private take: number
+  private lifetime: number
+
+  constructor(take: number, lifetime = 1.6) {
     super()
+    this.take = take
+    this.lifetime = lifetime
   }
 
   draw(ctx: OSContext): void {

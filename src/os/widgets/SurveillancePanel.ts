@@ -40,6 +40,9 @@ export class SurveillancePanel extends OSWindow {
   feed: FeedSource
   private camLabel: string
   private targets: Target[] = []
+  /** Identification banner ("SUJETO IDENTIFICADO") shows until this t. */
+  private markUntil = -1
+  private markFor = 0
 
   constructor(o: SurveillancePanelOpts, feed?: FeedSource) {
     super(o)
@@ -59,6 +62,29 @@ export class SurveillancePanel extends OSWindow {
     this.feed = feed
   }
 
+  get targetCount(): number {
+    return this.targets.length
+  }
+
+  /** Grow/shrink the simulated target population (fake overlay only). */
+  setTargetCount(n: number): void {
+    n = Math.max(0, Math.min(8, n))
+    while (this.targets.length > n) this.targets.pop()
+    while (this.targets.length < n) {
+      this.targets.push({
+        seed: Math.random() * 1000,
+        id: `SUJ-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+        confidence: 0.7 + Math.random() * 0.29,
+      })
+    }
+  }
+
+  /** Flash an identification banner over the viewport for a moment. */
+  flashMark(seconds = 3): void {
+    this.markFor = seconds
+    this.markUntil = -1 // stamped from ctx.t on next draw
+  }
+
   protected drawBody(ctx: OSContext, inner: Rect): void {
     const { p } = ctx
     const stripH = 20
@@ -75,20 +101,25 @@ export class SurveillancePanel extends OSWindow {
     dc.beginPath()
     dc.rect(view.x, view.y, view.w, view.h)
     dc.clip()
-    const live = this.feed.draw(ctx, view)
+    // Local binding so instanceof narrowing survives the method calls.
+    const feed = this.feed
+    const live = feed.draw(ctx, view)
 
-    const vision =
-      this.feed instanceof VideoFeed ? this.feed.vision : null
+    let vision: VisionEngine | null = null
     let realTracks: TrackedObject[] | null = null
-    if (live && vision) {
-      realTracks = vision.update(this.feed.element, ctx.dt)
-      this.drawRealTracks(ctx, this.feed, realTracks, view)
+    if (feed instanceof VideoFeed && feed.vision) {
+      vision = feed.vision
+      if (live) {
+        realTracks = vision.update(feed.element, ctx.dt)
+        this.drawRealTracks(ctx, feed, realTracks, view)
+      }
     }
     dc.restore()
 
     // --- Simulated overlay (only when real vision isn't running) -------
     if (!realTracks) this.drawFakeTargets(ctx, view)
 
+    this.drawMark(ctx, view)
     this.drawOSD(ctx, view, live)
     this.drawStrip(ctx, inner, view, stripH, vision, realTracks)
   }
@@ -204,6 +235,39 @@ export class SurveillancePanel extends OSWindow {
         p.text('FIJADO', a.x + bw, a.y + bh + 3)
       }
     }
+  }
+
+  /** "SUJETO IDENTIFICADO" strobe banner, triggered from direction. */
+  private drawMark(ctx: OSContext, view: Rect): void {
+    if (this.markFor > 0 && this.markUntil < 0) {
+      this.markUntil = ctx.t + this.markFor
+      this.markFor = 0
+    }
+    if (this.markUntil < 0 || ctx.t > this.markUntil) return
+    const { p, palette } = ctx
+    const blink = Math.floor(ctx.t * 4) % 3 !== 2
+    p.push()
+    const bh = 34
+    const by = view.y + view.h * 0.42
+    p.noStroke()
+    fillHex(p, palette.bg, 210)
+    p.rect(view.x + 8, by, view.w - 16, bh)
+    enableGlow(ctx, palette.danger, 0.8)
+    strokeHex(p, palette.danger, blink ? 255 : 120)
+    p.strokeWeight(1.5)
+    p.noFill()
+    p.rect(view.x + 8, by, view.w - 16, bh)
+    disableGlow(ctx)
+    p.noStroke()
+    fillHex(p, palette.danger, blink ? 255 : 140)
+    p.textSize(13)
+    p.textAlign(p.CENTER, p.CENTER)
+    p.text(
+      '⚠ SUJETO IDENTIFICADO — COINCIDENCIA 98.2% ⚠',
+      view.x + view.w / 2,
+      by + bh / 2 + 1,
+    )
+    p.pop()
   }
 
   private drawOSD(ctx: OSContext, view: Rect, live: boolean): void {
