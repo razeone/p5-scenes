@@ -62,6 +62,28 @@ const SCENE_ACTIONS: Partial<
     { id: 'call-drop', label: 'CAÍDA DE SEÑAL' },
     { id: 'call-reconnect', label: 'RECONECTAR', title: 'Rehace el handshake de la llamada' },
   ],
+  chip: [
+    { id: 'chip-drc', label: 'VIOLACIONES DRC', title: 'Tormenta de violaciones de diseño en el dado' },
+    { id: 'chip-thermal', label: 'PUNTO CALIENTE', title: 'Un bloque se sobrecalienta' },
+    { id: 'chip-layer', label: 'CAPA METAL', title: 'Cicla la capa de ruteo resaltada (M1–M5)' },
+    { id: 'chip-reroute', label: 'RE-RUTEO', title: 'El autorouter recalcula las redes' },
+    { id: 'chip-test', label: 'TEST BIST', title: 'Patrón de prueba en el analizador lógico' },
+    { id: 'chip-tapeout', label: 'TAPEOUT', title: 'Firma el GDSII y lo envía a fundición' },
+  ],
+  board: [
+    { id: 'board-restart', label: 'REINICIAR', title: 'Repite el ensamblaje desde el sustrato' },
+    { id: 'board-next', label: 'SIGUIENTE', title: 'Salta a la próxima estación' },
+    { id: 'board-power', label: 'ENCENDIDO', title: 'Salta al final: la placa entera se ilumina' },
+    { id: 'board-xray', label: 'RAYOS-X', title: 'Cobre brillante, componentes fantasma' },
+    { id: 'board-fault', label: 'FALLA', title: 'Cortocircuito con chispas en un componente' },
+  ],
+  implant: [
+    { id: 'bio-panic', label: 'PÁNICO', title: 'Crisis: FC 140+, cortisol y adrenalina al rojo' },
+    { id: 'bio-sedate', label: 'SEDAR', title: 'Microdosis remota: todo baja, estado DÓCIL' },
+    { id: 'bio-reward', label: 'RECOMPENSA', title: 'Pico de dopamina: estado EUFORIA' },
+    { id: 'bio-lie', label: 'ENGAÑO', title: 'Índice de engaño al 93% + pensamiento disidente' },
+    { id: 'bio-arrest', label: 'PARO', title: 'Asistolia con reanimación remota automática' },
+  ],
 }
 
 const PHASES: { id: OSPhase; label: string }[] = [
@@ -71,6 +93,9 @@ const PHASES: { id: OSPhase; label: string }[] = [
   { id: 'map', label: 'MAPA' },
   { id: 'sensors', label: 'SENSORES' },
   { id: 'call', label: 'LLAMADA' },
+  { id: 'chip', label: 'CHIP' },
+  { id: 'board', label: 'PLACA' },
+  { id: 'implant', label: 'IMPLANTE' },
 ]
 
 export default function ControlPanel({
@@ -83,8 +108,34 @@ export default function ControlPanel({
   const [hidden, setHidden] = useState(false)
   const [crt, setCrt] = useState(() => controller.getCrt())
   const [msg, setMsg] = useState('')
+  // Panel position: null = CSS default (bottom-right); set once dragged.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const slotRef = useRef<CamSlot>('cam-a')
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null)
+
+  // Drag the panel by its DIRECCIÓN title bar (pointer capture keeps the
+  // drag alive even when the cursor outruns the header).
+  const onHeadPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return // the ⨯
+    const r = panelRef.current?.getBoundingClientRect()
+    if (!r) return
+    dragRef.current = { dx: e.clientX - r.left, dy: e.clientY - r.top }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onHeadPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    const r = panelRef.current?.getBoundingClientRect()
+    if (!drag || !r) return
+    setPos({
+      x: Math.min(Math.max(e.clientX - drag.dx, 8 - r.width + 60), window.innerWidth - 60),
+      y: Math.min(Math.max(e.clientY - drag.dy, 0), window.innerHeight - 40),
+    })
+  }
+  const onHeadPointerUp = () => {
+    dragRef.current = null
+  }
 
   const slide = (key: CrtKey, value: number) => {
     setCrt((c) => ({ ...c, [key]: value }))
@@ -140,8 +191,21 @@ export default function ControlPanel({
   if (hidden) return null
 
   return (
-    <div className="ctrl">
-      <div className="ctrl-row ctrl-head">
+    <div
+      className="ctrl"
+      ref={panelRef}
+      style={
+        pos ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' } : undefined
+      }
+    >
+      <div
+        className="ctrl-row ctrl-head"
+        title="Arrastra para mover el panel"
+        onPointerDown={onHeadPointerDown}
+        onPointerMove={onHeadPointerMove}
+        onPointerUp={onHeadPointerUp}
+        onPointerCancel={onHeadPointerUp}
+      >
         <span className="ctrl-title">DIRECCIÓN</span>
         <button
           type="button"

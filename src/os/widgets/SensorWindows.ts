@@ -95,8 +95,9 @@ export class ScopeWindow extends OSWindow {
       gain = 1 + Math.min(2.6, remain) * (1.1 + ctx.p.noise(ctx.t * 5) * 0.6)
     }
     const gen = SCOPE_PRESETS[this.kind].gen
+    const speed = ctx.config.scenes.sensors.traceSpeed
     for (const ch of this.channels) {
-      ch.buf.push(gen(ctx.p, ctx.t, ch.seed) * gain)
+      ch.buf.push(gen(ctx.p, ctx.t * speed, ch.seed) * gain)
       if (ch.buf.length > 260) ch.buf.shift()
     }
   }

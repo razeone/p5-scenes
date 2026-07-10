@@ -32,6 +32,25 @@ import {
   GaugeArrayWindow,
 } from './widgets/SensorWindows'
 import { CallWindow } from './widgets/CallWindow'
+import {
+  DieMapWindow,
+  LogicAnalyzerWindow,
+  FabStatsWindow,
+  CHIP_FEED,
+} from './widgets/ChipWindows'
+import {
+  MotherboardWindow,
+  BoardManifestWindow,
+  BOARD_FEED,
+} from './widgets/BoardWindows'
+import {
+  BioStateEntity,
+  BodyMapWindow,
+  VitalsWindow,
+  NeuroChemWindow,
+  BehaviorWindow,
+  IMPLANT_FEED,
+} from './widgets/BioWindows'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
 import { CanvasRecorder, timestampSlug } from './media/Recorder'
@@ -66,6 +85,25 @@ export type SceneAction =
   | 'call-next-speaker'
   | 'call-drop'
   | 'call-reconnect'
+  // chip
+  | 'chip-drc'
+  | 'chip-thermal'
+  | 'chip-layer'
+  | 'chip-reroute'
+  | 'chip-test'
+  | 'chip-tapeout'
+  // placa
+  | 'board-restart'
+  | 'board-next'
+  | 'board-power'
+  | 'board-xray'
+  | 'board-fault'
+  // implante
+  | 'bio-panic'
+  | 'bio-sedate'
+  | 'bio-reward'
+  | 'bio-lie'
+  | 'bio-arrest'
 
 export interface OSController {
   setTheme(key: PaletteKey): void
@@ -127,7 +165,11 @@ export function createOSApp(
   const ctx: OSContext = {
     p: null as unknown as p5,
     palette: PALETTES[themeKey],
-    config: { ...CONFIG, crt: { ...CONFIG.crt } },
+    config: {
+      ...CONFIG,
+      crt: { ...CONFIG.crt },
+      scenes: structuredClone(CONFIG.scenes),
+    },
     width: container.clientWidth || 1280,
     height: container.clientHeight || 720,
     t: 0,
@@ -335,6 +377,15 @@ export function createOSApp(
       case 'call':
         buildCall()
         break
+      case 'chip':
+        buildChip()
+        break
+      case 'board':
+        buildBoard()
+        break
+      case 'implant':
+        buildImplant()
+        break
     }
     hooks.onPhaseChange?.(phase)
   }
@@ -382,15 +433,19 @@ export function createOSApp(
     const colH = H - top - M
 
     // Left: activity log.
-    const log = new ConsoleWindow({
-      x: M,
-      y: top,
-      w: logW,
-      h: colH,
-      title: `${CONFIG.agencyCode} // REGISTRO`,
-      tag: 'LIVE',
-      revealTime: 0.6,
-    })
+    const vigCfg = ctx.config.scenes.vigilancia
+    const log = new ConsoleWindow(
+      {
+        x: M,
+        y: top,
+        w: logW,
+        h: colH,
+        title: `${CONFIG.agencyCode} // REGISTRO`,
+        tag: 'LIVE',
+        revealTime: 0.6,
+      },
+      { autoFeedEvery: vigCfg.logEvery },
+    )
     log.id = 'log'
     scene.add(log, ctx)
 
@@ -404,7 +459,7 @@ export function createOSApp(
       title: 'VIGILANCIA // PLAZA-1',
       tag: 'CAM-07',
       camLabel: 'CAM-07 / PLAZA-1',
-      targetCount: 3,
+      targetCount: vigCfg.targetsCamA,
       revealTime: 0.7,
     })
     camA.id = 'cam-a'
@@ -418,7 +473,7 @@ export function createOSApp(
       title: 'VIGILANCIA // SECTOR-11',
       tag: 'CAM-12',
       camLabel: 'CAM-12 / SECTOR-11',
-      targetCount: 2,
+      targetCount: vigCfg.targetsCamB,
       accentKey: 'accent',
       revealTime: 0.9,
     })
@@ -476,15 +531,18 @@ export function createOSApp(
 
     const rx = W - rightW - M
     const logH = colH * 0.55
-    const log = new ConsoleWindow({
-      x: rx,
-      y: top,
-      w: rightW,
-      h: logH,
-      title: 'MOVIMIENTOS',
-      tag: 'LIVE',
-      revealTime: 0.8,
-    })
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: logH,
+        title: 'MOVIMIENTOS',
+        tag: 'LIVE',
+        revealTime: 0.8,
+      },
+      { autoFeedEvery: ctx.config.scenes.map.logEvery },
+    )
     log.id = 'log'
     scene.add(log, ctx)
     scene.add(
@@ -562,15 +620,18 @@ export function createOSApp(
 
     // Right: sensor event log.
     const rx = W - rightW - M
-    const log = new ConsoleWindow({
-      x: rx,
-      y: top,
-      w: rightW,
-      h: colH,
-      title: 'EVENTOS DE SENSOR',
-      tag: 'LIVE',
-      revealTime: 1.0,
-    })
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: colH,
+        title: 'EVENTOS DE SENSOR',
+        tag: 'LIVE',
+        revealTime: 1.0,
+      },
+      { autoFeedEvery: ctx.config.scenes.sensors.logEvery },
+    )
     log.id = 'log'
     scene.add(log, ctx)
   }
@@ -595,15 +656,234 @@ export function createOSApp(
     scene.add(call, ctx)
 
     const rx = W - sideW - M
-    const log = new ConsoleWindow({
-      x: rx,
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: sideW,
+        h: colH,
+        title: 'ACTA DE SESIÓN',
+        tag: 'REC',
+        revealTime: 0.8,
+      },
+      { autoFeedEvery: ctx.config.scenes.call.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
+  function buildChip(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const leftW = Math.max(430, W * 0.4)
+    const rightW = Math.max(280, W * 0.22)
+    const midW = W - leftW - rightW - M * 4
+
+    // Left: the die floorplan, full height.
+    const die = new DieMapWindow({
+      x: M,
       y: top,
-      w: sideW,
+      w: leftW,
       h: colH,
-      title: 'ACTA DE SESIÓN',
-      tag: 'REC',
-      revealTime: 0.8,
+      title: `${CONFIG.agencyCode} // ORÁCULO-1 — PLANO DE SILICIO`,
+      tag: '3NM',
+      revealTime: 0.6,
     })
+    die.id = 'die'
+    scene.add(die, ctx)
+
+    // Middle: logic analyzer over timing/wafer stats.
+    const wavesH = colH * 0.52
+    const waves = new LogicAnalyzerWindow({
+      x: M * 2 + leftW,
+      y: top,
+      w: midW,
+      h: wavesH,
+      title: 'ANALIZADOR LÓGICO — BUS DE DEPURACIÓN',
+      tag: '2.0GS/S',
+      accentKey: 'accent',
+      revealTime: 0.75,
+    })
+    waves.id = 'waves'
+    scene.add(waves, ctx)
+
+    const fab = new FabStatsWindow({
+      x: M * 2 + leftW,
+      y: top + wavesH + M,
+      w: midW,
+      h: colH - wavesH - M,
+      title: 'CIERRE DE TIEMPOS Y OBLEA',
+      tag: 'STA',
+      revealTime: 0.9,
+    })
+    fab.id = 'fab'
+    scene.add(fab, ctx)
+
+    // Right: EDA/foundry log.
+    const log = new ConsoleWindow(
+      {
+        x: W - rightW - M,
+        y: top,
+        w: rightW,
+        h: colH,
+        title: `${CONFIG.agencyCode} // REGISTRO EDA`,
+        tag: 'REC',
+        revealTime: 0.8,
+      },
+      { feed: CHIP_FEED, autoFeedEvery: ctx.config.scenes.chip.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
+  function buildBoard(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const rightW = Math.max(300, W * 0.24)
+    const boardW = W - rightW - M * 3
+
+    // Left: the assembly line, full height.
+    const board = new MotherboardWindow({
+      x: M,
+      y: top,
+      w: boardW,
+      h: colH,
+      title: `${CONFIG.agencyCode} // PLACA BASE 0447 — LÍNEA DE ENSAMBLAJE`,
+      tag: 'ATX',
+      revealTime: 0.6,
+    })
+    board.id = 'board'
+    scene.add(board, ctx)
+
+    // Right: manifest checklist over the assembly log.
+    const rx = W - rightW - M
+    const manifestH = Math.min(330, colH * 0.48)
+    const manifest = new BoardManifestWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: manifestH,
+        title: 'MANIFIESTO DE ENSAMBLAJE',
+        tag: 'QA',
+        accentKey: 'accent',
+        revealTime: 0.75,
+      },
+      board,
+    )
+    manifest.id = 'manifest'
+    scene.add(manifest, ctx)
+
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top + manifestH + M,
+        w: rightW,
+        h: colH - manifestH - M,
+        title: `${CONFIG.agencyCode} // REGISTRO DE LÍNEA`,
+        tag: 'REC',
+        revealTime: 0.9,
+      },
+      { feed: BOARD_FEED, autoFeedEvery: ctx.config.scenes.board.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
+  function buildImplant(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const bodyW = Math.max(280, W * 0.2)
+    const behW = Math.max(280, W * 0.22)
+    const logW = Math.max(280, W * 0.19)
+    const midW = W - bodyW - behW - logW - M * 5
+
+    // Shared subject simulation (invisible entity all windows read).
+    const bio = new BioStateEntity()
+    bio.id = 'bio'
+    scene.add(bio, ctx)
+
+    const body = new BodyMapWindow(
+      {
+        x: M,
+        y: top,
+        w: bodyW,
+        h: colH,
+        title: 'SUJETO 4471 — MAPA CORPORAL',
+        tag: 'IMPLANTE',
+        revealTime: 0.6,
+      },
+      bio,
+    )
+    body.id = 'bodymap'
+    scene.add(body, ctx)
+
+    // Middle: vitals over neurochemistry.
+    const vitH = colH * 0.52
+    const vitals = new VitalsWindow(
+      {
+        x: M * 2 + bodyW,
+        y: top,
+        w: midW,
+        h: vitH,
+        title: 'CONSTANTES VITALES — TIEMPO REAL',
+        tag: '512HZ',
+        revealTime: 0.7,
+      },
+      bio,
+    )
+    vitals.id = 'vitals'
+    scene.add(vitals, ctx)
+
+    const neuro = new NeuroChemWindow(
+      {
+        x: M * 2 + bodyW,
+        y: top + vitH + M,
+        w: midW,
+        h: colH - vitH - M,
+        title: 'NEUROQUÍMICA — MICRODIÁLISIS',
+        tag: 'CH-9',
+        accentKey: 'accent',
+        revealTime: 0.85,
+      },
+      bio,
+    )
+    neuro.id = 'neuro'
+    scene.add(neuro, ctx)
+
+    const behavior = new BehaviorWindow(
+      {
+        x: M * 3 + bodyW + midW,
+        y: top,
+        w: behW,
+        h: colH,
+        title: 'ANÁLISIS CONDUCTUAL',
+        tag: 'OMEGA',
+        revealTime: 0.95,
+      },
+      bio,
+    )
+    behavior.id = 'behavior'
+    scene.add(behavior, ctx)
+
+    const log = new ConsoleWindow(
+      {
+        x: W - logW - M,
+        y: top,
+        w: logW,
+        h: colH,
+        title: `${CONFIG.agencyCode} // BITÁCORA DEL IMPLANTE`,
+        tag: 'REC',
+        revealTime: 1.05,
+      },
+      { feed: IMPLANT_FEED, autoFeedEvery: ctx.config.scenes.implant.logEvery },
+    )
     log.id = 'log'
     scene.add(log, ctx)
   }
@@ -647,10 +927,11 @@ export function createOSApp(
   function runAction(action: SceneAction): void {
     const log = (text: string, level: LogLevel = 'info') =>
       controller.logLine(text, level)
+    const cfg = ctx.config.scenes
     switch (action) {
       // --- vigilancia --------------------------------------------------
       case 'cam-mark':
-        widgetById('cam-a', SurveillancePanel)?.flashMark()
+        widgetById('cam-a', SurveillancePanel)?.flashMark(cfg.vigilancia.markSeconds)
         log('COINCIDENCIA BIOMÉTRICA CONFIRMADA — EXPEDIENTE 4471', 'danger')
         break
       case 'targets-up':
@@ -686,16 +967,16 @@ export function createOSApp(
         break
       // --- sensores ----------------------------------------------------
       case 'sensor-quake':
-        widgetById('scope-seismic', ScopeWindow)?.excite()
+        widgetById('scope-seismic', ScopeWindow)?.excite(cfg.sensors.exciteSeconds)
         log('EVENTO SÍSMICO DETECTADO — MAGNITUD EN ANÁLISIS', 'danger')
         break
       case 'sensor-transmission':
-        widgetById('scope-rf', ScopeWindow)?.excite()
-        widgetById('spectrogram', SpectrogramWindow)?.burst()
+        widgetById('scope-rf', ScopeWindow)?.excite(cfg.sensors.exciteSeconds)
+        widgetById('spectrogram', SpectrogramWindow)?.burst(cfg.sensors.burstSeconds)
         log('TRANSMISIÓN NO REGISTRADA EN BANDA VIGILADA', 'warn')
         break
       case 'sensor-chem':
-        widgetById('gauges', GaugeArrayWindow)?.alarm()
+        widgetById('gauges', GaugeArrayWindow)?.alarm(cfg.sensors.alarmSeconds)
         log('UMBRAL QUÍMICO SUPERADO — NODO-4471', 'danger')
         break
       // --- llamada -----------------------------------------------------
@@ -703,12 +984,89 @@ export function createOSApp(
         widgetById('call', CallWindow)?.nextSpeaker()
         break
       case 'call-drop':
-        widgetById('call', CallWindow)?.dropSignal()
+        widgetById('call', CallWindow)?.dropSignal(cfg.call.dropSeconds)
         log('ENLACE DEGRADADO — REINTENTANDO', 'warn')
         break
       case 'call-reconnect':
         widgetById('call', CallWindow)?.reconnect()
         log('RENEGOCIANDO SESIÓN CIFRADA', 'info')
+        break
+      // --- chip ----------------------------------------------------------
+      case 'chip-drc':
+        widgetById('die', DieMapWindow)?.drcStorm()
+        widgetById('fab', FabStatsWindow)?.drcAlarm(cfg.chip.drcSeconds)
+        log('VERIFICACIÓN FÍSICA: VIOLACIONES DRC — ESPACIADO M3', 'danger')
+        break
+      case 'chip-thermal':
+        widgetById('die', DieMapWindow)?.thermalEvent()
+        widgetById('fab', FabStatsWindow)?.heatUp(cfg.chip.thermalSeconds)
+        log('PUNTO CALIENTE EN EL DADO — ACELERANDO DISIPACIÓN', 'danger')
+        break
+      case 'chip-layer': {
+        const layer = widgetById('die', DieMapWindow)?.cycleLayer()
+        if (layer) log(`CAPA DE RUTEO ACTIVA: ${layer}`, 'dim')
+        break
+      }
+      case 'chip-reroute':
+        widgetById('die', DieMapWindow)?.reroute()
+        log('RUTEO GLOBAL REINICIADO — CONGESTIÓN 3.1%', 'warn')
+        break
+      case 'chip-test':
+        widgetById('waves', LogicAnalyzerWindow)?.bist(cfg.chip.bistSeconds)
+        log('PATRÓN BIST INYECTADO EN CADENA DE EXPLORACIÓN', 'info')
+        break
+      case 'chip-tapeout':
+        widgetById('die', DieMapWindow)?.tapeout()
+        widgetById('fab', FabStatsWindow)?.freeze()
+        controller.announce('GDSII FIRMADO — ENVIADO A FUNDICIÓN NACIONAL')
+        log('TAPEOUT: GDSII FIRMADO — LOTE 0447 A FUNDICIÓN', 'ok')
+        break
+      // --- placa -----------------------------------------------------------
+      case 'board-restart':
+        widgetById('board', MotherboardWindow)?.restart()
+        log('LÍNEA REINICIADA — SUSTRATO EN BANCO', 'info')
+        break
+      case 'board-next':
+        widgetById('board', MotherboardWindow)?.skip()
+        log('ESTACIÓN LIBERADA — SIGUIENTE COMPONENTE', 'dim')
+        break
+      case 'board-power':
+        widgetById('board', MotherboardWindow)?.powerOn()
+        controller.announce('PLACA 0447 OPERATIVA — TENSIÓN NOMINAL')
+        log('ENCENDIDO: POST 00 — TODAS LAS TENSIONES OK', 'ok')
+        break
+      case 'board-xray': {
+        const on = widgetById('board', MotherboardWindow)?.toggleXray()
+        if (on !== undefined) {
+          log(on ? 'VISTA RAYOS-X — COBRE EXPUESTO' : 'VISTA NORMAL RESTAURADA', 'dim')
+        }
+        break
+      }
+      case 'board-fault':
+        widgetById('board', MotherboardWindow)?.shortCircuit()
+        log('CORTOCIRCUITO DETECTADO — AISLANDO RIEL', 'danger')
+        break
+      // --- implante --------------------------------------------------------
+      case 'bio-panic':
+        widgetById('bio', BioStateEntity)?.panic()
+        log('CRISIS DE PÁNICO — CORTISOL FUERA DE RANGO', 'danger')
+        break
+      case 'bio-sedate':
+        widgetById('bio', BioStateEntity)?.sedate()
+        log('MICRODOSIS LIBERADA — SEDACIÓN REMOTA ACTIVA', 'warn')
+        break
+      case 'bio-reward':
+        widgetById('bio', BioStateEntity)?.reward()
+        log('ESTÍMULO DE RECOMPENSA — LEALTAD REFORZADA', 'ok')
+        break
+      case 'bio-lie':
+        widgetById('bio', BioStateEntity)?.flagLie()
+        log('PATRÓN DE ENGAÑO DETECTADO — EXPEDIENTE ACTUALIZADO', 'danger')
+        break
+      case 'bio-arrest':
+        widgetById('bio', BioStateEntity)?.cardiacArrest()
+        controller.announce('SUJETO 4471 EN ASISTOLIA — REANIMACIÓN REMOTA')
+        log('ASISTOLIA — PROTOCOLO DE REANIMACIÓN REMOTA', 'danger')
         break
     }
   }

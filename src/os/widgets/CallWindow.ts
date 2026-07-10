@@ -25,7 +25,7 @@ interface Participant {
   cameraOn: boolean
 }
 
-const CONNECT_TIME = 2.4
+// Handshake duration lives in config.scenes.call.connectSeconds.
 
 export class CallWindow extends OSWindow {
   /** Local tile source; swapped by the director ('call-self'). */
@@ -72,6 +72,8 @@ export class CallWindow extends OSWindow {
 
   protected drawBody(ctx: OSContext, inner: Rect): void {
     const { p, palette } = ctx
+    const callCfg = ctx.config.scenes.call
+    const connectTime = callCfg.connectSeconds
     if (this.connectedAt < 0) this.connectedAt = ctx.t
     const el = ctx.t - this.connectedAt
 
@@ -95,18 +97,18 @@ export class CallWindow extends OSWindow {
     disableGlow(ctx)
     p.textAlign(p.RIGHT, p.CENTER)
     fillHex(p, palette.fg)
-    const live = Math.max(0, el - CONNECT_TIME)
+    const live = Math.max(0, el - connectTime)
     const mm = String(Math.floor(live / 60)).padStart(2, '0')
     const ss = String(Math.floor(live) % 60).padStart(2, '0')
     p.text(
-      el < CONNECT_TIME ? 'CONECTANDO…' : `EN LLAMADA ${mm}:${ss}`,
+      el < connectTime ? 'CONECTANDO…' : `EN LLAMADA ${mm}:${ss}`,
       inner.x + inner.w - 2,
       inner.y + chromeH / 2,
     )
 
     // --- Connecting overlay ---------------------------------------------
-    if (el < CONNECT_TIME) {
-      this.drawHandshake(ctx, grid, el / CONNECT_TIME)
+    if (el < connectTime) {
+      this.drawHandshake(ctx, grid, el / connectTime)
       this.drawStrip(ctx, inner, stripH, false)
       p.pop()
       return
@@ -119,7 +121,8 @@ export class CallWindow extends OSWindow {
     // Speaking rotates across everyone (index 3 = the local operator),
     // unless the director has forced the floor.
     const speaking =
-      this.speakerOverride ?? Math.floor(ctx.p.noise(ctx.t * 0.18) * 8) % 4
+      this.speakerOverride ??
+      Math.floor(ctx.p.noise(ctx.t * callCfg.speakerRate) * 8) % 4
     this.participants.forEach((pp, i) => {
       const tile: Rect = {
         x: grid.x + (i % 2) * (tw + gap),

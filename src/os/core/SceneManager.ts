@@ -16,6 +16,9 @@ export type OSPhase =
   | 'map'
   | 'sensors'
   | 'call'
+  | 'chip'
+  | 'board'
+  | 'implant'
 
 export class SceneManager {
   private entities: Entity[] = []

@@ -100,7 +100,7 @@ export class MapWindow extends OSWindow {
   }
 
   /** Streets + units derive from the seed; geometry is size-agnostic. */
-  private ensureLayout(): void {
+  private ensureLayout(ctx: OSContext): void {
     if (this.vLines.length > 0) return
     const rnd = mulberry32(this.seed)
     let x = 0.04
@@ -113,7 +113,9 @@ export class MapWindow extends OSWindow {
       this.hLines.push(y)
       y += 0.06 + rnd() * 0.1
     }
-    for (let i = 0; i < 7; i++) {
+    // Starting force size comes from the scene config (2 are suspects).
+    const count = Math.max(3, Math.round(ctx.config.scenes.map.units))
+    for (let i = 0; i < count; i++) {
       const hostile = i < 2
       this.units.push({
         x: rnd(),
@@ -218,7 +220,7 @@ export class MapWindow extends OSWindow {
   }
 
   update(ctx: OSContext): void {
-    this.ensureLayout()
+    this.ensureLayout(ctx)
     const rnd = () => ctx.p.random()
     for (const u of this.units) {
       const dx = u.tx - u.x
@@ -236,7 +238,8 @@ export class MapWindow extends OSWindow {
         }
       } else {
         // Manhattan movement: one axis at a time, like street traffic.
-        const step = u.speed * ctx.dt * 60 * 0.016
+        const step =
+          u.speed * ctx.config.scenes.map.unitSpeed * ctx.dt * 60 * 0.016
         if (Math.abs(dx) > 0.005) u.x += Math.sign(dx) * Math.min(step, Math.abs(dx))
         else u.y += Math.sign(dy) * Math.min(step, Math.abs(dy))
       }
@@ -245,7 +248,7 @@ export class MapWindow extends OSWindow {
 
   protected drawBody(ctx: OSContext, inner: Rect): void {
     const { p, palette } = ctx
-    this.ensureLayout()
+    this.ensureLayout(ctx)
     const base = this.ensureBase(ctx, inner)
     p.image(base, inner.x, inner.y)
 
@@ -264,7 +267,7 @@ export class MapWindow extends OSWindow {
     p.text('ZONA RESTRINGIDA', X(0.56), Y(0.08))
 
     // Target ping: expanding rings + crosshair.
-    const ping = (ctx.t * 0.6) % 1
+    const ping = (ctx.t * ctx.config.scenes.map.pingSpeed) % 1
     enableGlow(ctx, palette.danger, 0.7)
     strokeHex(p, palette.danger, (1 - ping) * 220)
     p.strokeWeight(1.5)

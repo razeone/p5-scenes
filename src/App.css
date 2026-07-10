@@ -83,6 +83,13 @@
 .ctrl-head {
   justify-content: space-between;
   margin-bottom: 8px;
+  /* Drag handle: grab the title bar to move the panel. */
+  cursor: grab;
+  touch-action: none;
+}
+
+.ctrl-head:active {
+  cursor: grabbing;
 }
 
 .ctrl-title {

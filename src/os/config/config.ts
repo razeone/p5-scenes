@@ -3,7 +3,10 @@
  *
  * This is the single place a director edits to re-skin the fictional OS
  * for a scene: rename the agency, change the operator, retime the boot,
- * dial the CRT intensity up or down. No render code needs touching.
+ * dial the CRT intensity up or down — and, under `scenes`, retime and
+ * reshape every screen (unit counts, trace speeds, cue durations,
+ * assembly pacing, the subject's heart rate…). No render code needs
+ * touching; widgets read these values live every frame.
  */
 
 import { PALETTE_ORDER, type PaletteKey } from './theme'
@@ -55,6 +58,89 @@ export interface OSConfig {
     loginTypeSpeed: number
     authDuration: number
   }
+
+  /** Per-scene tuning. Every screen reads these live, every frame. */
+  scenes: {
+    vigilancia: {
+      /** Simulated targets overlaid on each camera at build time. */
+      targetsCamA: number
+      targetsCamB: number
+      /** Seconds the "SUJETO IDENTIFICADO" banner stays up (cue). */
+      markSeconds: number
+      /** Seconds between ambient log lines. */
+      logEvery: number
+    }
+    map: {
+      /** Patrol units on the board at build time (min 3, incl. 2 suspects). */
+      units: number
+      /** Movement multiplier for all units (1 = normal). */
+      unitSpeed: number
+      /** Target ping expansion rate (rings per second). */
+      pingSpeed: number
+      logEvery: number
+    }
+    sensors: {
+      /** Time multiplier for scope traces (1 = normal, 2 = frantic). */
+      traceSpeed: number
+      /** Cue durations in seconds. */
+      exciteSeconds: number
+      burstSeconds: number
+      alarmSeconds: number
+      logEvery: number
+    }
+    call: {
+      /** Handshake duration in seconds. */
+      connectSeconds: number
+      /** Auto speaker-rotation rate (higher = floor changes faster). */
+      speakerRate: number
+      /** Signal-drop cue duration in seconds. */
+      dropSeconds: number
+      logEvery: number
+    }
+    chip: {
+      /** Routing pulse speed multiplier. */
+      pulseSpeed: number
+      /** DRC raster sweep speed multiplier. */
+      sweepSpeed: number
+      /** Logic-analyzer scroll speed in px/s. */
+      scrollSpeed: number
+      /** Cue durations in seconds. */
+      drcSeconds: number
+      thermalSeconds: number
+      bistSeconds: number
+      /** Tapeout sign-off sweep duration in seconds. */
+      tapeoutSweepSeconds: number
+      logEvery: number
+    }
+    board: {
+      /** Assembly pacing: per-station fly-in + inspection dwell. */
+      flyInSeconds: number
+      dwellSeconds: number
+      /** Power on automatically when the manifest completes. */
+      autoPowerOn: boolean
+      /** Seconds for the power wave to cross the board. */
+      waveSeconds: number
+      /** Copper power-pulse speed multiplier. */
+      pulseSpeed: number
+      /** Short-circuit cue duration in seconds. */
+      faultSeconds: number
+      logEvery: number
+    }
+    implant: {
+      /** Subject baselines (beats per minute). */
+      baseHr: number
+      panicHr: number
+      sedateHr: number
+      /** Cue durations in seconds. */
+      panicSeconds: number
+      sedateSeconds: number
+      rewardSeconds: number
+      lieSeconds: number
+      arrestSeconds: number
+      recoverySeconds: number
+      logEvery: number
+    }
+  }
 }
 
 export const CONFIG: OSConfig = {
@@ -85,5 +171,64 @@ export const CONFIG: OSConfig = {
     bootDuration: 4200,
     loginTypeSpeed: 90,
     authDuration: 2600,
+  },
+
+  scenes: {
+    vigilancia: {
+      targetsCamA: 3,
+      targetsCamB: 2,
+      markSeconds: 3,
+      logEvery: 1.4,
+    },
+    map: {
+      units: 7,
+      unitSpeed: 1,
+      pingSpeed: 0.6,
+      logEvery: 1.4,
+    },
+    sensors: {
+      traceSpeed: 1,
+      exciteSeconds: 4,
+      burstSeconds: 5,
+      alarmSeconds: 6,
+      logEvery: 1.4,
+    },
+    call: {
+      connectSeconds: 2.4,
+      speakerRate: 0.18,
+      dropSeconds: 3,
+      logEvery: 1.4,
+    },
+    chip: {
+      pulseSpeed: 1,
+      sweepSpeed: 1,
+      scrollSpeed: 42,
+      drcSeconds: 7,
+      thermalSeconds: 8,
+      bistSeconds: 5,
+      tapeoutSweepSeconds: 2.5,
+      logEvery: 1.6,
+    },
+    board: {
+      flyInSeconds: 0.5,
+      dwellSeconds: 1.7,
+      autoPowerOn: true,
+      waveSeconds: 2.2,
+      pulseSpeed: 1,
+      faultSeconds: 4,
+      logEvery: 1.8,
+    },
+    implant: {
+      baseHr: 72,
+      panicHr: 142,
+      sedateHr: 54,
+      panicSeconds: 10,
+      sedateSeconds: 12,
+      rewardSeconds: 8,
+      lieSeconds: 9,
+      arrestSeconds: 5,
+      recoverySeconds: 6,
+      logEvery: 1.7,
+    },
   },
 }
