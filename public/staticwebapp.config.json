@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/mediapipe/*", "/models/*", "*.{svg,png,jpg,ico,wasm,json,js,css,task,tflite}"]
+  },
+  "mimeTypes": {
+    ".wasm": "application/wasm",
+    ".task": "application/octet-stream",
+    ".tflite": "application/octet-stream"
+  },
+  "routes": [
+    {
+      "route": "/assets/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    }
+  ]
+}
