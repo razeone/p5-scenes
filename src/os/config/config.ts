@@ -126,6 +126,28 @@ export interface OSConfig {
       faultSeconds: number
       logEvery: number
     }
+    analysis: {
+      /** Multiplier from normalized track speed to the agitation score. */
+      agitationGain: number
+      /** Heatmap decay per second (higher = shorter memory). */
+      heatDecay: number
+      /** DPI level that triggers the preventive arrest order (0..1). */
+      dpiThreshold: number
+      /** Seconds for the dissent evaluation to ramp the DPI up. */
+      dissentSeconds: number
+      logEvery: number
+    }
+    loyalty: {
+      /** DPI level that triggers the preventive arrest order (0..1). */
+      dpiThreshold: number
+      /** Seconds for the dissent evaluation to ramp the DPI up. */
+      dissentSeconds: number
+      /** Seconds the Leader's portrait stimulus stays on screen. */
+      portraitSeconds: number
+      /** How much each CURAR CIFRA press inflates the published number. */
+      curateStep: number
+      logEvery: number
+    }
     implant: {
       /** Subject baselines (beats per minute). */
       baseHr: number
@@ -217,6 +239,20 @@ export const CONFIG: OSConfig = {
       pulseSpeed: 1,
       faultSeconds: 4,
       logEvery: 1.8,
+    },
+    analysis: {
+      agitationGain: 9,
+      heatDecay: 0.06,
+      dpiThreshold: 0.85,
+      dissentSeconds: 6,
+      logEvery: 1.6,
+    },
+    loyalty: {
+      dpiThreshold: 0.85,
+      dissentSeconds: 6,
+      portraitSeconds: 6,
+      curateStep: 0.008,
+      logEvery: 1.6,
     },
     implant: {
       baseHr: 72,

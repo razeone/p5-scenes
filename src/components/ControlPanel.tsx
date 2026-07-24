@@ -9,7 +9,7 @@
  * with the ⨯ or Ctrl+H anyway if it distracts.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { CamSlot, OSController, SceneAction } from '../os/OSApp'
 import type { OSPhase } from '../os/core/SceneManager'
 import type { OSConfig } from '../os/config/config'
@@ -84,6 +84,32 @@ const SCENE_ACTIONS: Partial<
     { id: 'bio-lie', label: 'ENGAÑO', title: 'Índice de engaño al 93% + pensamiento disidente' },
     { id: 'bio-arrest', label: 'PARO', title: 'Asistolia con reanimación remota automática' },
   ],
+  loyalty: [
+    { id: 'loy-portrait', label: 'RETRATO', title: 'Muestra al Líder y mide la respuesta neural' },
+    { id: 'loy-dissent', label: 'DISIDENCIA', title: 'El DPI sube hasta cruzar el umbral de arresto' },
+    { id: 'loy-pardon', label: 'INDULTO', title: 'Rescinde la orden: "el dato era erróneo"' },
+    { id: 'loy-curate', label: 'CURAR CIFRA', title: 'Infla la felicidad publicada, hunde la real' },
+    { id: 'bio-panic', label: 'PÁNICO', title: 'El índice de miedo se dispara' },
+  ],
+  analysis: [
+    { id: 'cam-mark', label: 'IDENTIFICAR', title: 'Banner "sujeto identificado" sobre el video' },
+    { id: 'ana-dissent', label: 'DISIDENCIA', title: 'El DPI (alimentado por la cámara) cruza el umbral' },
+    { id: 'ana-pardon', label: 'INDULTO', title: 'Rescinde la orden de arresto' },
+    { id: 'ana-reset', label: 'CALIBRAR', title: 'Borra heatmap e historiales — nueva línea base' },
+  ],
+}
+
+// Where footage can land per scene. Only working targets get buttons —
+// pressing WEBCAM→A in LLAMADA used to dispose the feed into nothing.
+const VIDEO_TARGETS: Partial<
+  Record<OSPhase, { slot: CamSlot; label: string }[]>
+> = {
+  desktop: [
+    { slot: 'cam-a', label: 'A' },
+    { slot: 'cam-b', label: 'B' },
+  ],
+  analysis: [{ slot: 'cam-a', label: 'CÁMARA' }],
+  call: [{ slot: 'call-self', label: 'LLAMADA' }],
 }
 
 const PHASES: { id: OSPhase; label: string }[] = [
@@ -96,6 +122,8 @@ const PHASES: { id: OSPhase; label: string }[] = [
   { id: 'chip', label: 'CHIP' },
   { id: 'board', label: 'PLACA' },
   { id: 'implant', label: 'IMPLANTE' },
+  { id: 'loyalty', label: 'LEALTAD' },
+  { id: 'analysis', label: 'ANÁLISIS' },
 ]
 
 export default function ControlPanel({
@@ -265,38 +293,34 @@ export default function ControlPanel({
         ))}
       </div>
 
-      <div className="ctrl-row">
-        <span className="ctrl-label">VIDEO</span>
-        <button type="button" onClick={() => pickVideo('cam-a')}>
-          ARCHIVO→A
-        </button>
-        <button type="button" onClick={() => pickVideo('cam-b')}>
-          ARCHIVO→B
-        </button>
-        <button type="button" onClick={() => void controller.useWebcam('cam-a')}>
-          WEBCAM→A
-        </button>
-        <button type="button" onClick={() => void controller.useWebcam('cam-b')}>
-          WEBCAM→B
-        </button>
-        <button
-          type="button"
-          title="Tu webcam en la videollamada (escena LLAMADA)"
-          onClick={() => void controller.useWebcam('call-self')}
-        >
-          WEBCAM→LLAMADA
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            controller.clearFeed('cam-a')
-            controller.clearFeed('cam-b')
-            controller.clearFeed('call-self')
-          }}
-        >
-          LIMPIAR
-        </button>
-      </div>
+      {VIDEO_TARGETS[phase] && (
+        <div className="ctrl-row">
+          <span className="ctrl-label">VIDEO</span>
+          {VIDEO_TARGETS[phase]!.map(({ slot, label }) => (
+            <Fragment key={slot}>
+              <button type="button" onClick={() => pickVideo(slot)}>
+                ARCHIVO→{label}
+              </button>
+              <button
+                type="button"
+                onClick={() => void controller.useWebcam(slot)}
+              >
+                WEBCAM→{label}
+              </button>
+            </Fragment>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              controller.clearFeed('cam-a')
+              controller.clearFeed('cam-b')
+              controller.clearFeed('call-self')
+            }}
+          >
+            LIMPIAR
+          </button>
+        </div>
+      )}
 
       <div className="ctrl-row">
         <span className="ctrl-label">AMBIENTE</span>
@@ -374,7 +398,8 @@ export default function ControlPanel({
       </div>
 
       <div className="ctrl-hint">
-        arrastra ventanas por su barra de título · video al lienzo → CAM-A ·
+        arrastra ventanas por su barra de título · video al lienzo → cámara
+        de la escena ·
         Ctrl+1..{PALETTE_ORDER.length} temas · Ctrl+G grabar · Ctrl+I visión ·
         Ctrl+H ocultar
       </div>

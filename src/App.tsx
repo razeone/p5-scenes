@@ -15,7 +15,8 @@ function App() {
   const [recording, setRecording] = useState(false)
   const [vision, setVision] = useState(true)
 
-  // Drag-drop footage anywhere on the canvas → CAM-A.
+  // Drag-drop footage anywhere on the canvas → the scene's camera
+  // (CAM-A where it exists; the call's self tile in LLAMADA).
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
@@ -48,7 +49,7 @@ function App() {
         }}
       />
       {dragging && (
-        <div className="drop-hint">SOLTAR VIDEO → CAM-A</div>
+        <div className="drop-hint">SOLTAR VIDEO → CÁMARA DE LA ESCENA</div>
       )}
       {recording && <RecBadge />}
       {controller && (

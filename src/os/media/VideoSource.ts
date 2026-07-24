@@ -39,7 +39,8 @@ export class VideoFeed implements FeedSource {
     video.muted = true
     video.loop = true
     video.playsInline = true
-    void video.play()
+    // dispose() can pause before play() resolves — that abort is fine.
+    video.play().catch(() => {})
     const feed = new VideoFeed(video, `ARCHIVO // ${file.name.toUpperCase()}`)
     feed.objectUrl = url
     return feed
@@ -55,7 +56,7 @@ export class VideoFeed implements FeedSource {
     video.srcObject = stream
     video.muted = true
     video.playsInline = true
-    void video.play()
+    video.play().catch(() => {})
     const feed = new VideoFeed(video, 'CAM-EN-VIVO')
     feed.stream = stream
     return feed

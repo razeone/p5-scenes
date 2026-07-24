@@ -51,6 +51,20 @@ import {
   BehaviorWindow,
   IMPLANT_FEED,
 } from './widgets/BioWindows'
+import {
+  LoyaltyStateEntity,
+  PhysioWindow,
+  ConductWindow,
+  LoyaltyWindow,
+  StateWindow,
+  LOYALTY_FEED,
+} from './widgets/LoyaltyWindows'
+import {
+  LiveMetricsEntity,
+  LiveAnalysisWindow,
+  LiveVerdictWindow,
+  ANALYSIS_FEED,
+} from './widgets/AnalysisWindows'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
 import { CanvasRecorder, timestampSlug } from './media/Recorder'
@@ -104,6 +118,15 @@ export type SceneAction =
   | 'bio-reward'
   | 'bio-lie'
   | 'bio-arrest'
+  // lealtad
+  | 'loy-portrait'
+  | 'loy-dissent'
+  | 'loy-pardon'
+  | 'loy-curate'
+  // análisis (lealtad sobre video real)
+  | 'ana-dissent'
+  | 'ana-pardon'
+  | 'ana-reset'
 
 export interface OSController {
   setTheme(key: PaletteKey): void
@@ -385,6 +408,12 @@ export function createOSApp(
         break
       case 'implant':
         buildImplant()
+        break
+      case 'loyalty':
+        buildLoyalty()
+        break
+      case 'analysis':
+        buildAnalysis()
         break
     }
     hooks.onPhaseChange?.(phase)
@@ -888,6 +917,182 @@ export function createOSApp(
     scene.add(log, ctx)
   }
 
+  function buildLoyalty(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const physW = Math.max(280, W * 0.22)
+    const condW = Math.max(320, W * 0.26)
+    const loyW = Math.max(320, W * 0.26)
+    const rightW = W - physW - condW - loyW - M * 5
+
+    // Same subject simulation as IMPLANTE + the regime's derived scores.
+    const bio = new BioStateEntity()
+    bio.id = 'bio'
+    scene.add(bio, ctx)
+    const loy = new LoyaltyStateEntity(bio)
+    loy.id = 'loy'
+    scene.add(loy, ctx)
+
+    const physio = new PhysioWindow(
+      {
+        x: M,
+        y: top,
+        w: physW,
+        h: colH,
+        title: 'FISIOLOGÍA — SUJETO 4471',
+        tag: 'MIEDO',
+        revealTime: 0.6,
+      },
+      bio,
+      loy,
+    )
+    physio.id = 'physio'
+    scene.add(physio, ctx)
+
+    const conduct = new ConductWindow(
+      {
+        x: M * 2 + physW,
+        y: top,
+        w: condW,
+        h: colH,
+        title: 'CONDUCTA Y PRODUCTIVIDAD',
+        tag: 'CUOTA',
+        accentKey: 'accent',
+        revealTime: 0.75,
+      },
+      loy,
+    )
+    conduct.id = 'conduct'
+    scene.add(conduct, ctx)
+
+    const loyalty = new LoyaltyWindow(
+      {
+        x: M * 3 + physW + condW,
+        y: top,
+        w: loyW,
+        h: colH,
+        title: 'LEALTAD — CLASIFICADO OMEGA',
+        tag: 'DPI',
+        revealTime: 0.9,
+      },
+      loy,
+    )
+    loyalty.id = 'loyalty'
+    scene.add(loyalty, ctx)
+
+    const rx = W - rightW - M
+    const stateH = Math.min(240, colH * 0.42)
+    const state = new StateWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: stateH,
+        title: 'TABLERO NACIONAL',
+        tag: 'LÍDER',
+        accentKey: 'accent',
+        revealTime: 1.0,
+      },
+      loy,
+    )
+    state.id = 'state'
+    scene.add(state, ctx)
+
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top + stateH + M,
+        w: rightW,
+        h: colH - stateH - M,
+        title: `${CONFIG.agencyCode} // BITÁCORA DE LEALTAD`,
+        tag: 'REC',
+        revealTime: 1.1,
+      },
+      { feed: LOYALTY_FEED, autoFeedEvery: ctx.config.scenes.loyalty.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
+  function buildAnalysis(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const colH = H - top - M
+    const camW = Math.max(420, W * 0.34)
+    const anaW = Math.max(300, W * 0.24)
+    const verW = Math.max(280, W * 0.22)
+    const logW = W - camW - anaW - verW - M * 5
+
+    // The evaluation camera sits in the 'cam-a' slot so the director's
+    // ARCHIVO→A / WEBCAM→A buttons pipe video (and vision) straight in.
+    const cam = new SurveillancePanel({
+      x: M,
+      y: top,
+      w: camW,
+      h: colH,
+      title: 'EVALUACIÓN // SALA DE OBSERVACIÓN 1',
+      tag: 'CAM-EVAL',
+      camLabel: 'CAM-EVAL / SALA-1',
+      targetCount: 2,
+      revealTime: 0.6,
+    })
+    cam.id = 'cam-a'
+    scene.add(cam, ctx)
+
+    const live = new LiveMetricsEntity(cam)
+    live.id = 'live'
+    scene.add(live, ctx)
+
+    const analysis = new LiveAnalysisWindow(
+      {
+        x: M * 2 + camW,
+        y: top,
+        w: anaW,
+        h: colH,
+        title: 'MÉTRICAS DE VISIÓN — TIEMPO REAL',
+        tag: 'IA',
+        accentKey: 'accent',
+        revealTime: 0.75,
+      },
+      live,
+    )
+    analysis.id = 'analysis'
+    scene.add(analysis, ctx)
+
+    const verdict = new LiveVerdictWindow(
+      {
+        x: M * 3 + camW + anaW,
+        y: top,
+        w: verW,
+        h: colH,
+        title: 'VEREDICTO ALGORÍTMICO',
+        tag: 'DPI',
+        revealTime: 0.9,
+      },
+      live,
+    )
+    verdict.id = 'verdict'
+    scene.add(verdict, ctx)
+
+    const log = new ConsoleWindow(
+      {
+        x: W - logW - M,
+        y: top,
+        w: logW,
+        h: colH,
+        title: `${CONFIG.agencyCode} // CADENA DE CUSTODIA`,
+        tag: 'REC',
+        revealTime: 1.0,
+      },
+      { feed: ANALYSIS_FEED, autoFeedEvery: ctx.config.scenes.analysis.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+  }
+
   const instance = new p5(sketch, container)
 
   function applyTheme(key: PaletteKey) {
@@ -1068,6 +1273,38 @@ export function createOSApp(
         controller.announce('SUJETO 4471 EN ASISTOLIA — REANIMACIÓN REMOTA')
         log('ASISTOLIA — PROTOCOLO DE REANIMACIÓN REMOTA', 'danger')
         break
+      // --- lealtad ---------------------------------------------------------
+      case 'loy-portrait':
+        widgetById('loy', LoyaltyStateEntity)?.showPortrait()
+        log('RETRATO DEL LÍDER EN PANTALLA — MIDIENDO RESPUESTA', 'warn')
+        break
+      case 'loy-dissent':
+        widgetById('loy', LoyaltyStateEntity)?.dissent()
+        controller.announce('EVALUACIÓN DE DISIDENCIA EN CURSO — SUJETO 4471')
+        log('ALGORITMO DE DISIDENCIA: EVALUACIÓN PRIORITARIA', 'danger')
+        break
+      case 'loy-pardon':
+        widgetById('loy', LoyaltyStateEntity)?.pardon()
+        log('ORDEN RESCINDIDA — "EL DATO ERA ERRÓNEO"', 'ok')
+        break
+      case 'loy-curate':
+        widgetById('loy', LoyaltyStateEntity)?.curate()
+        log('FELICIDAD NACIONAL CURADA PARA EL BOLETÍN', 'dim')
+        break
+      // --- análisis ----------------------------------------------------------
+      case 'ana-dissent':
+        widgetById('live', LiveMetricsEntity)?.dissent()
+        controller.announce('EVALUACIÓN DE DISIDENCIA SOBRE EVIDENCIA VISUAL')
+        log('ALGORITMO DE DISIDENCIA: PONDERANDO CONDUCTA EN CÁMARA', 'danger')
+        break
+      case 'ana-pardon':
+        widgetById('live', LiveMetricsEntity)?.pardon()
+        log('ORDEN RESCINDIDA — EVIDENCIA VISUAL INSUFICIENTE', 'ok')
+        break
+      case 'ana-reset':
+        widgetById('live', LiveMetricsEntity)?.reset()
+        log('CALIBRACIÓN REINICIADA — NUEVA LÍNEA BASE', 'info')
+        break
     }
   }
 
@@ -1083,7 +1320,14 @@ export function createOSApp(
   }
 
   function swapFeed(slot: CamSlot, feed: VideoFeed | StaticFeed): void {
-    const holder = holderFor(slot)
+    // Scene-aware fallback: if the requested slot doesn't exist in the
+    // current scene, land the footage on whatever can show it instead
+    // of silently disposing it (LLAMADA only has the call's self tile).
+    const holder =
+      holderFor(slot) ??
+      holderFor('cam-a') ??
+      holderFor('cam-b') ??
+      holderFor('call-self')
     if (!holder) {
       if (feed instanceof VideoFeed) feed.dispose()
       return
