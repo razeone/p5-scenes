@@ -14,7 +14,10 @@
 import p5 from 'p5'
 import { CONFIG, type OSConfig } from './config/config'
 import { PALETTES, PALETTE_ORDER, type PaletteKey } from './config/theme'
-import type { OSContext } from './core/context'
+import type {
+  DirectorClockState,
+  OSContext,
+} from './core/context'
 import { SceneManager, type OSPhase } from './core/SceneManager'
 import { drawBackground, applyPost } from './fx/Effects'
 import { BootSequence } from './widgets/BootSequence'
@@ -67,13 +70,32 @@ import {
 } from './widgets/AnalysisWindows'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
-import { CanvasRecorder, timestampSlug } from './media/Recorder'
+import { CanvasRecorder, timestampSlug, type TakeInfo } from './media/Recorder'
 import { VisionEngine } from './vision/VisionEngine'
 import { Slate } from './widgets/Slate'
+import { HypervigilanceScene } from './widgets/HypervigilanceScene'
+import {
+  DEFAULT_STUDIO_EFFECTS,
+  STUDIO_PRESETS,
+  VideoEffectsStudio,
+  type StudioEffects,
+} from './widgets/VideoEffectsStudio'
 import type { LogLevel } from './widgets/TextStream'
 
 /** Slots the director can pipe video into (panels + the call's self tile). */
-export type CamSlot = 'cam-a' | 'cam-b' | 'call-self'
+export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio'
+export type StudioPreset = keyof typeof STUDIO_PRESETS
+
+export interface StudioMediaState {
+  ready: boolean
+  label: string
+  currentTime: number
+  duration: number
+  paused: boolean
+}
+
+/** A finished take with its slate number, for the session take list. */
+export type SavedTake = TakeInfo & { take: number }
 
 /**
  * One-shot scene-specific direction cues. Each acts on the widgets of
@@ -137,12 +159,32 @@ export interface OSController {
   getPhase(): OSPhase
   /** Restart the whole performance from boot. */
   restart(): void
+  /** Rebuild the current scene without changing its phase. */
+  reloadScene(): void
+  /** Dispose current video sources and rebuild the current scene. */
+  reloadMedia(): void
+  /** Reset the current take and its scene-local timeline. */
+  resetTake(): void
+  /** Transport controls for rehearsal and deterministic rendering. */
+  play(): void
+  pause(): void
+  step(seconds?: number): void
+  seek(seconds: number): void
+  setSpeed(speed: number): void
+  getClock(): DirectorClockState
+  setMovieTitle(title: string): void
+  getMovieTitle(): string
   /** Pipe a video file into a surveillance slot (desktop phase). */
   loadVideoFile(file: File, slot?: CamSlot): void
   /** Pipe the live webcam into a surveillance slot. */
   useWebcam(slot?: CamSlot): Promise<void>
   /** Drop a slot back to static. */
   clearFeed(slot?: CamSlot): void
+  /** Patch or reset the full-screen studio's effect pipeline. */
+  setStudioEffects(patch: Partial<StudioEffects>): void
+  getStudioEffects(): StudioEffects
+  applyStudioPreset(preset: StudioPreset): void
+  getStudioMediaState(): StudioMediaState
   /** Toggle real object detection/tracking on the video feeds. */
   setVision(on: boolean): void
   isVisionOn(): boolean
@@ -164,6 +206,8 @@ export interface OSController {
   /** Cut: finalize the take and auto-download it. */
   stopRecording(): void
   isRecording(): boolean
+  /** Number of the last take recorded this session (0 = none yet). */
+  getTake(): number
   destroy(): void
 }
 
@@ -173,6 +217,8 @@ export interface OSHooks {
   onPhaseChange?: (phase: OSPhase) => void
   onRecordingChange?: (recording: boolean) => void
   onVisionChange?: (on: boolean) => void
+  /** A take finished; the receiver owns revoking take.url. */
+  onTakeSaved?: (take: SavedTake) => void
 }
 
 export function createOSApp(
@@ -198,9 +244,21 @@ export function createOSApp(
     t: 0,
     frame: 0,
     dt: 0,
+    clock: {
+      mode: 'realtime',
+      time: 0,
+      frame: 0,
+      speed: 1,
+    },
   }
 
   let lastMs = 0
+  let clockMode: 'realtime' | 'paused' | 'manual' = 'realtime'
+  let clockTime = 0
+  let clockFrame = 0
+  let clockSpeed = 1
+  let pendingStep = 0
+  let previousClockTime = 0
   // p5 v2 runs setup asynchronously — remember phase requests that arrive
   // before the canvas exists instead of letting setup stomp them.
   let ready = false
@@ -213,6 +271,7 @@ export function createOSApp(
 
   const recorder = new CanvasRecorder()
   recorder.onStateChange = (rec) => hooks.onRecordingChange?.(rec)
+  recorder.onTakeSaved = (info) => hooks.onTakeSaved?.({ ...info, take })
 
   const sketch = (p: p5) => {
     ctx.p = p
@@ -237,10 +296,23 @@ export function createOSApp(
 
     p.draw = () => {
       const now = p.millis()
-      ctx.dt = Math.min((now - lastMs) / 1000, 0.1)
+      const wallDt = Math.min((now - lastMs) / 1000, 0.1)
       lastMs = now
-      ctx.t = now / 1000
-      ctx.frame = p.frameCount
+      const advance =
+        clockMode === 'realtime' ? wallDt * clockSpeed : pendingStep
+      pendingStep = 0
+      clockTime += advance
+      clockFrame += advance > 0 ? 1 : 0
+      ctx.dt = Math.max(0, clockTime - previousClockTime)
+      previousClockTime = clockTime
+      ctx.t = clockTime
+      ctx.frame = clockFrame
+      ctx.clock = {
+        mode: clockMode,
+        time: clockTime,
+        frame: clockFrame,
+        speed: clockSpeed,
+      }
       ctx.palette = PALETTES[themeKey]
 
       drawBackground(ctx)
@@ -363,6 +435,7 @@ export function createOSApp(
     ctx.width = w
     ctx.height = h
     ctx.p.resizeCanvas(w, h)
+    if (scene.phase === 'video-effects') return
     setPhase(scene.phase)
   }
 
@@ -379,6 +452,8 @@ export function createOSApp(
       return
     }
     scene.phase = phase
+    resetClock()
+    disposeSceneFeeds()
     scene.clear()
     scene.setFocus(null)
     switch (phase) {
@@ -387,6 +462,9 @@ export function createOSApp(
         break
       case 'login':
         buildLogin()
+        break
+      case 'hypervigilance':
+        buildHypervigilance()
         break
       case 'desktop':
         buildDesktop()
@@ -415,8 +493,79 @@ export function createOSApp(
       case 'analysis':
         buildAnalysis()
         break
+      case 'video-effects':
+        buildVideoEffects()
+        break
     }
     hooks.onPhaseChange?.(phase)
+  }
+
+  function resetClock(): void {
+    clockMode = 'realtime'
+    clockTime = 0
+    clockFrame = 0
+    pendingStep = 0
+    previousClockTime = 0
+    ctx.t = 0
+    ctx.dt = 0
+    ctx.frame = 0
+    ctx.clock = {
+      mode: clockMode,
+      time: clockTime,
+      frame: clockFrame,
+      speed: clockSpeed,
+    }
+  }
+
+  function playClock(): void {
+    clockMode = 'realtime'
+  }
+
+  function pauseClock(): void {
+    clockMode = 'paused'
+    pendingStep = 0
+  }
+
+  function stepClock(seconds = 1 / 60): void {
+    clockMode = 'manual'
+    pendingStep += Math.max(0, seconds)
+  }
+
+  function seekClock(seconds: number): void {
+    clockMode = 'manual'
+    clockTime = Math.max(0, seconds)
+    pendingStep = 0
+    previousClockTime = clockTime
+    ctx.t = clockTime
+    ctx.dt = 0
+  }
+
+  function setClockSpeed(speed: number): void {
+    clockSpeed = Math.max(0, Math.min(8, speed))
+  }
+
+  function disposeSceneFeeds(): void {
+    const disposed = new Set<VideoFeed>()
+    for (const entity of scene.all) {
+      const feed =
+        entity instanceof SurveillancePanel ||
+        entity instanceof CallWindow ||
+        entity instanceof VideoEffectsStudio
+          ? entity.feed
+          : null
+      if (feed instanceof VideoFeed && !disposed.has(feed)) {
+        disposed.add(feed)
+        feed.dispose()
+      }
+    }
+  }
+
+  function setMovieTitle(title: string): void {
+    ctx.config.movieTitle = title.trim() || CONFIG.movieTitle
+    const cinematic = scene.get('hypervigilance')
+    if (cinematic instanceof HypervigilanceScene) {
+      cinematic.setTitle(ctx.config.movieTitle)
+    }
   }
 
   /** Shared top strip + the content area below it. */
@@ -444,10 +593,54 @@ export function createOSApp(
       title: `${CONFIG.agencyCode} // AUTENTICACIÓN`,
       tag: 'SEGURO',
       revealTime: 0.5,
-    })
-    login.onComplete = () => setPhase('desktop')
+    }, { autoType: true })
+    login.onComplete = () => setPhase('hypervigilance')
     scene.add(login, ctx)
     scene.setFocus(login)
+  }
+
+  function buildHypervigilance(): void {
+    const { top, M } = addStatusBar()
+    const count = Math.max(
+      1,
+      Math.min(9, ctx.config.scenes.hypervigilance.activeScreens),
+    )
+    const columns = Math.ceil(Math.sqrt(count))
+    const rows = Math.ceil(count / columns)
+    const wallW = ctx.width - M * 2
+    const wallH = ctx.height - top - M
+    const gap = M / 2
+    const tileW = (wallW - gap * (columns - 1)) / columns
+    const tileH = (wallH - gap * (rows - 1)) / rows
+
+    for (let i = 0; i < count; i++) {
+      const col = i % columns
+      const row = Math.floor(i / columns)
+      const panel = new SurveillancePanel({
+        x: M + col * (tileW + gap),
+        y: top + row * (tileH + gap),
+        w: tileW,
+        h: tileH,
+        title: `VIGILANCIA // NODO-${String(i + 1).padStart(2, '0')}`,
+        tag: `CAM-${String(i + 1).padStart(2, '0')}`,
+        camLabel: `HYPERVIGILANCE / ${String(i + 1).padStart(2, '0')}`,
+        targetCount: i % 3,
+        revealTime: 0.15 + i * 0.04,
+      })
+      panel.id = `hv-screen-${i + 1}`
+      scene.add(panel, ctx)
+    }
+
+    const cinematic = new HypervigilanceScene({
+      title: ctx.config.movieTitle,
+      montageSeconds: ctx.config.scenes.hypervigilance.montageSeconds,
+      flareSeconds: ctx.config.scenes.hypervigilance.flareSeconds,
+      titleSeconds: ctx.config.scenes.hypervigilance.titleSeconds,
+      onComplete: () => setPhase('desktop'),
+    })
+    cinematic.id = 'hypervigilance'
+    cinematic.z = 100
+    scene.add(cinematic, ctx)
   }
 
   function buildDesktop(): void {
@@ -1093,6 +1286,12 @@ export function createOSApp(
     scene.add(log, ctx)
   }
 
+  function buildVideoEffects(): void {
+    const studio = new VideoEffectsStudio()
+    studio.id = 'studio'
+    scene.add(studio, ctx)
+  }
+
   const instance = new p5(sketch, container)
 
   function applyTheme(key: PaletteKey) {
@@ -1311,7 +1510,11 @@ export function createOSApp(
   /** Anything that can display a feed: surveillance panels + call tile. */
   function holderFor(
     slot: CamSlot,
-  ): SurveillancePanel | CallWindow | undefined {
+  ): SurveillancePanel | CallWindow | VideoEffectsStudio | undefined {
+    if (slot === 'studio') {
+      const e = scene.get('studio')
+      return e instanceof VideoEffectsStudio ? e : undefined
+    }
     if (slot === 'call-self') {
       const e = scene.get('call')
       return e instanceof CallWindow ? e : undefined
@@ -1327,7 +1530,8 @@ export function createOSApp(
       holderFor(slot) ??
       holderFor('cam-a') ??
       holderFor('cam-b') ??
-      holderFor('call-self')
+      holderFor('call-self') ??
+      holderFor('studio')
     if (!holder) {
       if (feed instanceof VideoFeed) feed.dispose()
       return
@@ -1337,7 +1541,7 @@ export function createOSApp(
     if (
       feed instanceof VideoFeed &&
       visionOn &&
-      holder instanceof SurveillancePanel
+      (holder instanceof SurveillancePanel || holder instanceof VideoEffectsStudio)
     ) {
       feed.vision = new VisionEngine()
     }
@@ -1351,6 +1555,10 @@ export function createOSApp(
       if (feed instanceof VideoFeed) {
         feed.vision = on ? (feed.vision ?? new VisionEngine()) : null
       }
+    }
+    const studioFeed = holderFor('studio')?.feed
+    if (studioFeed instanceof VideoFeed) {
+      studioFeed.vision = on ? (studioFeed.vision ?? new VisionEngine()) : null
     }
     hooks.onVisionChange?.(on)
   }
@@ -1367,11 +1575,61 @@ export function createOSApp(
     setPhase: (phase) => setPhase(phase),
     getPhase: () => scene.phase,
     restart: () => setPhase('boot'),
+    reloadScene: () => setPhase(scene.phase),
+    reloadMedia: () => {
+      disposeSceneFeeds()
+      setPhase(scene.phase)
+    },
+    resetTake: () => {
+      // Back to a clean slate: take numbering restarts at TOMA 01.
+      take = 0
+      setPhase(scene.phase)
+    },
+    play: () => playClock(),
+    pause: () => pauseClock(),
+    step: (seconds) => stepClock(seconds),
+    seek: (seconds) => seekClock(seconds),
+    setSpeed: (speed) => setClockSpeed(speed),
+    getClock: () => ({
+      mode: clockMode,
+      time: clockTime,
+      frame: clockFrame,
+      speed: clockSpeed,
+    }),
+    setMovieTitle: (title) => setMovieTitle(title),
+    getMovieTitle: () => {
+      const cinematic = scene.get('hypervigilance')
+      return cinematic instanceof HypervigilanceScene
+        ? cinematic.movieTitle
+        : ctx.config.movieTitle
+    },
     loadVideoFile: (file, slot = 'cam-a') =>
       swapFeed(slot, VideoFeed.fromFile(file)),
     useWebcam: async (slot = 'cam-a') =>
       swapFeed(slot, await VideoFeed.fromWebcam()),
     clearFeed: (slot = 'cam-a') => swapFeed(slot, new StaticFeed()),
+    setStudioEffects: (patch) => {
+      widgetById('studio', VideoEffectsStudio)?.patchEffects(patch)
+    },
+    getStudioEffects: () => ({
+      ...(widgetById('studio', VideoEffectsStudio)?.effects ?? DEFAULT_STUDIO_EFFECTS),
+    }),
+    applyStudioPreset: (preset) => {
+      const studio = widgetById('studio', VideoEffectsStudio)
+      if (studio) studio.effects = { ...STUDIO_PRESETS[preset] }
+    },
+    getStudioMediaState: () => {
+      const feed = widgetById('studio', VideoEffectsStudio)?.feed
+      return feed instanceof VideoFeed
+        ? {
+            ready: feed.ready,
+            label: feed.label,
+            currentTime: feed.currentTime,
+            duration: feed.duration,
+            paused: feed.paused,
+          }
+        : { ready: false, label: 'NO SIGNAL', currentTime: 0, duration: 0, paused: true }
+    },
     setVision: (on) => setVision(on),
     isVisionOn: () => visionOn,
     setCrt: (patch) => {
@@ -1410,9 +1668,11 @@ export function createOSApp(
     },
     stopRecording: () => recorder.stop(),
     isRecording: () => recorder.recording,
+    getTake: () => take,
     destroy: () => {
       destroyed = true
       sizeObserver.disconnect()
+      disposeSceneFeeds()
       recorder.stop()
       instance.remove()
     },
@@ -1442,6 +1702,8 @@ export function createOSApp(
             z: w.z,
             focused: w.focused,
           })),
+          clock: () => controller.getClock(),
+          phase: () => controller.getPhase(),
     }
   }
 

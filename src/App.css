@@ -67,7 +67,8 @@
 
 /* Keyboard a11y: visible focus ring on every panel control. */
 .ctrl button:focus-visible,
-.ctrl input:focus-visible {
+.ctrl input:focus-visible,
+.ctrl a:focus-visible {
   outline: 2px solid rgba(140, 255, 170, 0.9);
   outline-offset: 1px;
 }
@@ -165,6 +166,133 @@
   letter-spacing: 0.08em;
 }
 
+.ctrl-dim {
+  opacity: 0.45;
+  letter-spacing: 0.08em;
+}
+
+/* Transient error line (webcam denied, etc.). */
+.ctrl-err {
+  margin: -2px 0 6px 58px;
+  color: #ffb36b;
+  letter-spacing: 0.08em;
+}
+
+/* Scene-clock timecode readout in the TIEMPO row. */
+.ctrl-tc {
+  min-width: 58px;
+  padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+  color: #eaffea;
+  background: rgba(20, 30, 22, 0.8);
+  border: 1px solid rgba(160, 200, 170, 0.35);
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.ctrl-scrub {
+  flex: 1;
+  min-width: 140px;
+  accent-color: #7fdc93;
+}
+
+/* ---- Session take list (review / re-download / discard) ------------ */
+
+.ctrl-takes {
+  margin: -2px 0 8px 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ctrl-take {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctrl-take-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+  letter-spacing: 0.06em;
+}
+
+.ctrl-take button,
+.ctrl-take .ctrl-take-dl {
+  padding: 3px 6px;
+}
+
+/* Download link dressed as a panel button. */
+.ctrl-take-dl {
+  font: 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: #cfd8cf;
+  text-decoration: none;
+  border: 1px solid rgba(160, 200, 170, 0.35);
+  border-radius: 3px;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.ctrl-take-dl:hover {
+  border-color: rgba(200, 255, 210, 0.8);
+  color: #fff;
+}
+
+.ctrl-take-x {
+  border: none !important;
+  padding: 0 4px !important;
+}
+
+/* ---- Record count-in overlay (off-canvas, never captured) ---------- */
+
+.rec-countdown {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(0, 0, 0, 0.45);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  color: #fff;
+}
+
+.rec-countdown-num {
+  font: 700 120px/1 var(--mono);
+  color: #ffecec;
+  text-shadow: 0 0 24px rgba(255, 70, 70, 0.8);
+  animation: rec-count-pop 1s ease-out infinite;
+}
+
+.rec-countdown-hint {
+  font: 11px/1 var(--mono);
+  letter-spacing: 0.18em;
+  color: rgba(255, 236, 236, 0.75);
+}
+
+@keyframes rec-count-pop {
+  from {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+}
+
 /* Ambience slider bank. */
 .ctrl-slider {
   display: inline-flex;
@@ -185,6 +313,17 @@
   accent-color: #7fdc93;
   background: transparent;
   cursor: pointer;
+}
+
+.ctrl-fx-bank {
+  align-items: flex-end;
+  padding: 6px 0;
+  border-top: 1px solid rgba(160, 200, 170, 0.18);
+  border-bottom: 1px solid rgba(160, 200, 170, 0.18);
+}
+
+.ctrl-fx-bank .ctrl-slider input[type='range'] {
+  width: 64px;
 }
 
 /* Message injection field. */

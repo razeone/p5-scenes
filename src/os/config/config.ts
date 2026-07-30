@@ -22,6 +22,8 @@ export interface OSConfig {
   agencyCode: string
   /** Motto / propaganda line shown after login. */
   motto: string
+  /** Movie identity shown by the opening cinematic. */
+  movieTitle: string
   /**
    * Operator credentials for the interactive login. The actor types these
    * on set; the login validates against them (wrong input → ACCESS DENIED).
@@ -69,6 +71,12 @@ export interface OSConfig {
       markSeconds: number
       /** Seconds between ambient log lines. */
       logEvery: number
+    }
+    hypervigilance: {
+      montageSeconds: number
+      flareSeconds: number
+      titleSeconds: number
+      activeScreens: number
     }
     map: {
       /** Patrol units on the board at build time (min 3, incl. 2 suspects). */
@@ -171,6 +179,7 @@ export const CONFIG: OSConfig = {
   agency: 'EL BUEN GOBIERNO',
   agencyCode: 'EBG',
   motto: 'EL QUE NADA DEBE, NADA TEME',
+  movieTitle: 'HYPERVIGILANCE',
   operator: {
     user: 'AGENTE.K7',
     password: 'OBEDIENCIA',
@@ -201,6 +210,12 @@ export const CONFIG: OSConfig = {
       targetsCamB: 2,
       markSeconds: 3,
       logEvery: 1.4,
+    },
+    hypervigilance: {
+      montageSeconds: 12,
+      flareSeconds: 0.8,
+      titleSeconds: 3.2,
+      activeScreens: 9,
     },
     map: {
       units: 7,

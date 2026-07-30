@@ -1,4 +1,11 @@
-# PANOPTICON OS — p5 surveillance-OS scenes
+---
+title: PANOPTICON OS - p5 surveillance-OS scenes
+description: A filmable p5.js surveillance operating system with director-controlled scenes and recording tools.
+ms.date: 2026-07-23
+ms.topic: overview
+---
+
+# PANOPTICON OS - p5 surveillance-OS scenes
 
 A fictional dystopian operating system rendered on a p5.js canvas, built to
 be **filmed**: an actor can boot it, log in on camera, and operate a
@@ -6,9 +13,11 @@ surveillance desktop, while a director stages takes from an off-camera
 control panel. React (Vite) hosts the canvas and the director UI; all the
 fiction is drawn in p5 instance mode.
 
-The performance opens with **boot** (BIOS/POST roll) → **login**
-(interactive terminal, real typing), then the director can stage any of
-four desks: **vigilancia** (activity log, dual camera feeds, telemetry,
+The default opening is **boot** (BIOS/POST roll) → **login** (automated
+credential typing with manual takeover) → **hypervigilancia** (a bounded
+surveillance wall, flare, and configurable movie title) → **vigilancia**.
+The director can also stage any of the desks directly: **vigilancia**
+(activity log, dual camera feeds, telemetry,
 radar), **mapa** (tactical city map — procedural street grid, sector
 boundaries, restricted zone, patrol units, target ping), **sensores**
 (seismic/acoustic/RF scopes, SIGINT spectrogram waterfall, environmental
@@ -50,7 +59,18 @@ a manual walkthrough plus a scripted CDP smoke test.
    field.
 3. On the desktop, exercise the director panel (bottom right):
    - **ESCENA** — jump straight to any scene for retakes: BOOT, LOGIN,
-     VIGILANCIA, MAPA, SENSORES, LLAMADA.
+     HYPERVIGILANCIA, VIGILANCIA, MAPA, SENSORES, LLAMADA.
+   - **TIEMPO** — a live scene-clock timecode (`mm:ss.d`), play, pause,
+     advance one frame, advance one second, reset the scene clock, and
+     change playback speed (the slider shows its value; a `1×` button
+     appears whenever speed is off-normal). PLAY/PAUSA highlight to show
+     the transport state. Pausing leaves the canvas visible while scene
+     time stops.
+   - **TÍTULO** — while HYPERVIGILANCIA is active, edit the movie title
+     shown after the white flare or restore `HYPERVIGILANCE`.
+   - **RECARGA** — rebuild the current scene, dispose and rebuild current
+     media, or `TOMA 0`: rebuild the scene **and** restart take
+     numbering at TOMA 01.
    - **Windows drag** — grab any window by its title bar (cursor shows
      a grab hand); it raises above the others and gets a brighter
      focused frame. Positions reset on scene change/resize.
@@ -73,14 +93,34 @@ a manual walkthrough plus a scripted CDP smoke test.
      pushes it into the activity log (Enter does the same), `ALERTA`
      pushes it in danger red, `AVISO` blinks it as a status-bar
      directive for a few seconds.
-   - **TOMA** — `● GRABAR` records the canvas; `■ CORTAR` stops and
-     auto-downloads a numbered take (`os-toma-01-<timestamp>.webm`).
-     Also `Ctrl+G`. Each take opens with a 1.6 s burned-in slate (take
-     number, OS, wall clock) and a blinking REC badge shows while
-     rolling. `FOTO` downloads a PNG still. Only the canvas is captured
-     — the panel and badge never appear in footage.
+   - **TOMA** (top row — it's the highest-stakes control) — `● GRABAR`
+     records the canvas; `■ CORTAR` stops and auto-downloads a numbered
+     take (`os-toma-01-<timestamp>.webm`). Also `Ctrl+G`. `● EN 3S`
+     starts after a full-screen 3-2-1 count-in (click or `Esc` cancels)
+     so a solo operator can get in front of the camera; the countdown
+     overlay is DOM, so it never appears in footage. While rolling the
+     row shows the take number and elapsed time; while idle it shows
+     the next take number (`PRÓX T02`). Each take opens with a 1.6 s
+     burned-in slate (take number, OS, wall clock) and a blinking REC
+     badge shows while rolling. `FOTO` downloads a PNG still. Only the
+     canvas is captured — the panel, badge and countdown never appear
+     in footage.
+   - **Take list (editing)** — the last 5 takes of the session stay
+     listed under TOMA with duration and size: `VER` reviews the WebM
+     in a new tab, `BAJAR` re-downloads it (covers a missed/cancelled
+     auto-download), `⨯` drops it from the list (frees the in-memory
+     blob; already-downloaded files are untouched).
    - `Ctrl+H` hides/shows the panel (shortcuts stay live while hidden).
-4. Resize the window — the current phase re-lays out for the new size.
+4. Resize the window — the current phase re-lays out for the new size and
+  disposes active video sources before rebuilding.
+
+The initial hypervigilance wall currently supports up to nine procedural
+surveillance screens. Its timing and screen count are configured under
+`scenes.hypervigilance` in
+[`src/os/config/config.ts`](src/os/config/config.ts). The bounded screen
+pool is the first performance guard for the planned 33-clip media bank;
+file-backed clip rotation and custom screen layouts are the next
+implementation slice.
 
 ### Console API (dev builds)
 
@@ -88,7 +128,11 @@ The controller is exposed as `window.__os` for quick direction on set or
 scripted checks:
 
 ```js
-__os.setPhase('desktop')   // 'boot' | 'login' | 'desktop'
+__os.setPhase('hypervigilance')  // or 'boot', 'login', 'desktop'
+__os.play(); __os.pause(); __os.step(); __os.step(1)
+__os.seek(0); __os.setSpeed(2); __os.getClock()
+__os.reloadScene(); __os.reloadMedia(); __os.resetTake()
+__os.setMovieTitle('HYPERVIGILANCE')
 __os.cycleTheme()          // or setTheme('amber'), getThemeKey()
 __os.useWebcam('cam-b')    // or loadVideoFile(file, 'cam-a'), clearFeed()
 __os.setVision(false)      // toggle detection/tracking; isVisionOn()
@@ -98,11 +142,14 @@ __os.logLine('SUJETO LOCALIZADO', 'danger')  // into the activity log
 __os.announce('TOQUE DE QUEDA 21:00')        // status-bar directive
 __os.screenshot()          // PNG still of the canvas
 __os.startRecording(); __os.isRecording(); __os.stopRecording()
+__os.getTake()             // last take number this session (0 = none)
 __os.restart()
 
 __osDebug.visionStatus('cam-a')  // 'loading' | 'active' | 'error'
 __osDebug.tracks('cam-a')        // live TrackedObject[] (video px coords)
 __osDebug.windows()              // window positions / z-order / focus
+__osDebug.clock()                // director clock state
+__osDebug.phase()                // active phase
 ```
 
 ### Scripted smoke tests
@@ -191,6 +238,14 @@ A polish pass over both surfaces, with every finding fixed in place:
 - **Input routing** — p5's global key handlers stand down while a DOM
   input is focused, so panel typing can't leak into the login terminal
   (and vice versa).
+- **Recording & take review (second pass)** — the TOMA row moved to the
+  top of the panel and shows take number + elapsed time while rolling;
+  a 3 s count-in supports solo operation; finished takes stay
+  reviewable in a session take list (VER / BAJAR / discard) instead of
+  vanishing after the auto-download's 5 s blob-URL window; the TIEMPO
+  row gained a live timecode, PLAY/PAUSA active states and a speed
+  readout with a `1×` reset; `TOMA 0` actually resets take numbering;
+  webcam failures surface as a panel note instead of failing silently.
 
 Vision data flow: `SurveillancePanel` calls `VisionEngine.update()`
 every draw with the feed's `<video>`; the engine runs MediaPipe

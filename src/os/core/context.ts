@@ -13,6 +13,15 @@ import type { OSConfig } from '../config/config'
 
 export const MONO_FONT = '"Courier New", "DejaVu Sans Mono", monospace'
 
+export type DirectorClockMode = 'realtime' | 'paused' | 'manual'
+
+export interface DirectorClockState {
+  mode: DirectorClockMode
+  time: number
+  frame: number
+  speed: number
+}
+
 export interface OSContext {
   /** Live p5 instance (instance mode). */
   p: p5
@@ -30,6 +39,8 @@ export interface OSContext {
   frame: number
   /** Delta time in seconds since last frame. */
   dt: number
+  /** Director-controlled transport state for repeatable scene rehearsal. */
+  clock: DirectorClockState
 }
 
 /**

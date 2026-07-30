@@ -18,8 +18,8 @@ import { ObjectTracker, type TrackedObject } from './ObjectTracker'
 
 export type VisionStatus = 'loading' | 'active' | 'error'
 
-const WASM_PATH = '/mediapipe/wasm'
-const MODEL_PATH = '/models/efficientdet_lite0.tflite'
+const WASM_PATH = `${import.meta.env.BASE_URL}mediapipe/wasm`
+const MODEL_PATH = `${import.meta.env.BASE_URL}models/efficientdet_lite0.tflite`
 const DETECT_EVERY_MS = 100
 const SCORE_THRESHOLD = 0.4
 const MAX_RESULTS = 12

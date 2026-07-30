@@ -12,6 +12,7 @@ import { isKeyTarget, type Entity, type KeyTarget } from './Entity'
 export type OSPhase =
   | 'boot'
   | 'login'
+  | 'hypervigilance'
   | 'desktop'
   | 'map'
   | 'sensors'
@@ -21,6 +22,7 @@ export type OSPhase =
   | 'implant'
   | 'loyalty'
   | 'analysis'
+  | 'video-effects'
 
 export class SceneManager {
   private entities: Entity[] = []

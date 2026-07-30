@@ -30,13 +30,17 @@ export class LoginWindow extends OSWindow implements KeyTarget {
   private userInput = ''
   private passInput = ''
   private attempts = 0
+  private autoType = false
+  private autoIndex = 0
 
-  constructor(o: OSWindowOpts) {
+  constructor(o: OSWindowOpts, options: { autoType?: boolean } = {}) {
     super(o)
+    this.autoType = options.autoType ?? false
   }
 
   handleKey(ctx: OSContext, key: string): void {
     if (this.state !== 'user' && this.state !== 'pass') return
+    this.autoType = false
 
     const field = this.state === 'user' ? 'userInput' : 'passInput'
     if (key === 'Enter') {
@@ -56,6 +60,7 @@ export class LoginWindow extends OSWindow implements KeyTarget {
   private enter(state: LoginState, ctx: OSContext): void {
     this.state = state
     this.stateStart = ctx.t
+    this.autoIndex = 0
   }
 
   private credentialsValid(ctx: OSContext): boolean {
@@ -69,6 +74,27 @@ export class LoginWindow extends OSWindow implements KeyTarget {
   update(ctx: OSContext): void {
     if (this.stateStart < 0) this.stateStart = ctx.t
     const el = ctx.t - this.stateStart
+
+    if (this.autoType && (this.state === 'user' || this.state === 'pass')) {
+      const source =
+        this.state === 'user'
+          ? ctx.config.operator.user.toUpperCase()
+          : ctx.config.operator.password.toUpperCase()
+      const target = this.state === 'user' ? this.userInput : this.passInput
+      const nextIndex = Math.floor(
+        (el * 1000) / Math.max(1, ctx.config.timing.loginTypeSpeed),
+      )
+      if (nextIndex > this.autoIndex && target.length < source.length) {
+        const value = source[target.length]
+        if (this.state === 'user') this.userInput += value
+        else this.passInput += value
+        this.autoIndex = nextIndex
+      }
+      if (target.length >= source.length) {
+        this.enter(this.state === 'user' ? 'pass' : 'auth', ctx)
+      }
+      return
+    }
 
     switch (this.state) {
       case 'auth': {

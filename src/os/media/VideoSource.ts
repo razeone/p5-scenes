@@ -67,6 +67,39 @@ export class VideoFeed implements FeedSource {
     return this.video
   }
 
+  get ready(): boolean {
+    return this.video.readyState >= 2 && this.video.videoWidth > 0
+  }
+
+  get duration(): number {
+    return Number.isFinite(this.video.duration) ? this.video.duration : 0
+  }
+
+  get currentTime(): number {
+    return this.video.currentTime
+  }
+
+  get paused(): boolean {
+    return this.video.paused
+  }
+
+  play(): void {
+    this.video.play().catch(() => {})
+  }
+
+  pause(): void {
+    this.video.pause()
+  }
+
+  seek(seconds: number): void {
+    if (!this.ready || !Number.isFinite(seconds)) return
+    this.video.currentTime = Math.max(0, Math.min(seconds, this.duration || seconds))
+  }
+
+  setPlaybackRate(speed: number): void {
+    this.video.playbackRate = Math.max(0.1, Math.min(4, speed || 1))
+  }
+
   /** Map a point in source-video pixels to canvas coords (last draw). */
   toViewport(x: number, y: number): { x: number; y: number } {
     const m = this.map
