@@ -1,6 +1,7 @@
 supportedArchitectures:
   os:
     - win32
+    - linux
   cpu:
     - arm64
     - x64
