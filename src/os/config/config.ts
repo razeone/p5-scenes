@@ -87,6 +87,26 @@ export interface OSConfig {
       pingSpeed: number
       logEvery: number
     }
+    geo: {
+      /** Initial tile zoom (5 = country, 16 = street, 19 = rooftop). */
+      zoom: number
+      /** Pursuit units deployed at build time. */
+      units: number
+      /** Ground speeds in km/h. */
+      targetSpeedKmh: number
+      unitSpeedKmh: number
+      /** Target ping expansion rate (rings per second). */
+      pingSpeed: number
+      /** Seconds of GPS breadcrumb trail kept behind the target. */
+      trailSeconds: number
+      /** Operational perimeter radius in meters (geofence ring). */
+      perimeterM: number
+      logEvery: number
+    }
+    gallery: {
+      /** Seconds between ambient log lines on the dossier board. */
+      logEvery: number
+    }
     sensors: {
       /** Time multiplier for scope traces (1 = normal, 2 = frantic). */
       traceSpeed: number
@@ -170,6 +190,10 @@ export interface OSConfig {
       recoverySeconds: number
       logEvery: number
     }
+    silence: {
+      /** Seconds a silenced target remains frozen before reset. */
+      resetSeconds: number
+    }
   }
 }
 
@@ -222,6 +246,19 @@ export const CONFIG: OSConfig = {
       unitSpeed: 1,
       pingSpeed: 0.6,
       logEvery: 1.4,
+    },
+    geo: {
+      zoom: 16,
+      units: 4,
+      targetSpeedKmh: 28,
+      unitSpeedKmh: 38,
+      pingSpeed: 0.6,
+      trailSeconds: 120,
+      perimeterM: 1500,
+      logEvery: 1.4,
+    },
+    gallery: {
+      logEvery: 2.2,
     },
     sensors: {
       traceSpeed: 1,
@@ -280,6 +317,9 @@ export const CONFIG: OSConfig = {
       arrestSeconds: 5,
       recoverySeconds: 6,
       logEvery: 1.7,
+    },
+    silence: {
+      resetSeconds: 10,
     },
   },
 }

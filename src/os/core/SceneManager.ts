@@ -15,6 +15,8 @@ export type OSPhase =
   | 'hypervigilance'
   | 'desktop'
   | 'map'
+  | 'geo'
+  | 'gallery'
   | 'sensors'
   | 'call'
   | 'chip'
@@ -23,6 +25,7 @@ export type OSPhase =
   | 'loyalty'
   | 'analysis'
   | 'video-effects'
+  | 'silence'
 
 export class SceneManager {
   private entities: Entity[] = []

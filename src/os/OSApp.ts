@@ -29,6 +29,12 @@ import { RadarWindow } from './widgets/RadarWindow'
 import { StatusBar } from './widgets/StatusBar'
 import { OSWindow } from './widgets/OSWindow'
 import { MapWindow } from './widgets/MapWindow'
+import { GeoMapWindow } from './widgets/GeoMapWindow'
+import {
+  GalleryWindow,
+  buildDossier,
+  type GalleryTarget,
+} from './widgets/GalleryWindow'
 import {
   ScopeWindow,
   SpectrogramWindow,
@@ -74,6 +80,7 @@ import { CanvasRecorder, timestampSlug, type TakeInfo } from './media/Recorder'
 import { VisionEngine } from './vision/VisionEngine'
 import { Slate } from './widgets/Slate'
 import { HypervigilanceScene } from './widgets/HypervigilanceScene'
+import { SilenceScene } from './widgets/SilenceScene'
 import {
   DEFAULT_STUDIO_EFFECTS,
   STUDIO_PRESETS,
@@ -83,7 +90,7 @@ import {
 import type { LogLevel } from './widgets/TextStream'
 
 /** Slots the director can pipe video into (panels + the call's self tile). */
-export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio'
+export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio' | 'silence'
 export type StudioPreset = keyof typeof STUDIO_PRESETS
 
 export interface StudioMediaState {
@@ -113,6 +120,23 @@ export type SceneAction =
   | 'map-patrol'
   | 'map-add-unit'
   | 'map-remove-unit'
+  // geo (rastreo sobre mapa real)
+  | 'geo-new-target'
+  | 'geo-chase'
+  | 'geo-patrol'
+  | 'geo-follow'
+  | 'geo-zoom-in'
+  | 'geo-zoom-out'
+  | 'geo-city'
+  | 'geo-add-unit'
+  | 'geo-remove-unit'
+  // gallery (galería de expedientes)
+  | 'gallery-reroll'
+  | 'gallery-silence-all'
+  | 'gallery-capture-all'
+  | 'gallery-advance'
+  | 'gallery-next-page'
+  | 'gallery-prev-page'
   // sensores
   | 'sensor-quake'
   | 'sensor-transmission'
@@ -180,6 +204,8 @@ export interface OSController {
   useWebcam(slot?: CamSlot): Promise<void>
   /** Drop a slot back to static. */
   clearFeed(slot?: CamSlot): void
+  /** Load image files (folder or set) into the dossier gallery scene. */
+  loadGalleryImages(files: File[]): void
   /** Patch or reset the full-screen studio's effect pipeline. */
   setStudioEffects(patch: Partial<StudioEffects>): void
   getStudioEffects(): StudioEffects
@@ -268,6 +294,9 @@ export function createOSApp(
   // instance.remove() is a no-op pre-canvas, so setup must self-abort or
   // a zombie instance keeps drawing and firing hooks.
   let destroyed = false
+  // Loaded dossier images persist across scene rebuilds so switching
+  // themes / phases and returning keeps the board intact.
+  let galleryTargets: GalleryTarget[] = []
 
   const recorder = new CanvasRecorder()
   recorder.onStateChange = (rec) => hooks.onRecordingChange?.(rec)
@@ -393,9 +422,22 @@ export function createOSApp(
     p.mousePressed = (event?: object) => {
       if (event instanceof MouseEvent && event.target !== canvasEl) return
       const hit = windowAt(p.mouseX, p.mouseY, false)
-      if (!hit) return
+      if (!hit) {
+        if (scene.phase === 'silence') {
+          widgetById('silence', SilenceScene)?.click(ctx)
+        }
+        return
+      }
       scene.bringToFront(hit)
       setFocused(hit)
+      // Clicking a dossier card body (not the title bar) cycles its state.
+      if (
+        hit instanceof GalleryWindow &&
+        !hit.titleBarContains(p.mouseX, p.mouseY)
+      ) {
+        const t = hit.clickBody(ctx, p.mouseX, p.mouseY)
+        if (t) controller.logLine(`${t.name}: ${t.caseId} → ESTADO ACTUALIZADO`, 'info')
+      }
       if (hit.draggable && hit.titleBarContains(p.mouseX, p.mouseY)) {
         dragWin = hit
         if (canvasEl) canvasEl.style.cursor = 'grabbing'
@@ -435,7 +477,7 @@ export function createOSApp(
     ctx.width = w
     ctx.height = h
     ctx.p.resizeCanvas(w, h)
-    if (scene.phase === 'video-effects') return
+    if (scene.phase === 'video-effects' || scene.phase === 'silence') return
     setPhase(scene.phase)
   }
 
@@ -472,6 +514,12 @@ export function createOSApp(
       case 'map':
         buildMap()
         break
+      case 'geo':
+        buildGeo()
+        break
+      case 'gallery':
+        buildGallery()
+        break
       case 'sensors':
         buildSensors()
         break
@@ -495,6 +543,9 @@ export function createOSApp(
         break
       case 'video-effects':
         buildVideoEffects()
+        break
+      case 'silence':
+        buildSilence()
         break
     }
     hooks.onPhaseChange?.(phase)
@@ -550,7 +601,8 @@ export function createOSApp(
       const feed =
         entity instanceof SurveillancePanel ||
         entity instanceof CallWindow ||
-        entity instanceof VideoEffectsStudio
+        entity instanceof VideoEffectsStudio ||
+        entity instanceof SilenceScene
           ? entity.feed
           : null
       if (feed instanceof VideoFeed && !disposed.has(feed)) {
@@ -779,6 +831,92 @@ export function createOSApp(
       }),
       ctx,
     )
+  }
+
+  function buildGeo(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const rightW = Math.max(280, W * 0.24)
+    const colH = H - top - M
+
+    const geo = new GeoMapWindow({
+      x: M,
+      y: top,
+      w: W - rightW - M * 3,
+      h: colH,
+      title: `${CONFIG.agencyCode} // RASTREO GEOESPACIAL — GPS EN VIVO`,
+      tag: 'SAT',
+      revealTime: 0.6,
+    })
+    geo.id = 'geo'
+    scene.add(geo, ctx)
+
+    const rx = W - rightW - M
+    const logH = colH * 0.55
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: logH,
+        title: 'ENLACE SATELITAL',
+        tag: 'LIVE',
+        revealTime: 0.8,
+      },
+      { autoFeedEvery: ctx.config.scenes.geo.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+    scene.add(
+      new RadarWindow({
+        x: rx,
+        y: top + logH + M,
+        w: rightW,
+        h: colH - logH - M,
+        title: 'RASTREO AÉREO',
+        tag: 'DRON-3',
+        revealTime: 1.0,
+      }),
+      ctx,
+    )
+  }
+
+  function buildGallery(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const rightW = Math.max(280, W * 0.24)
+    const colH = H - top - M
+
+    const gallery = new GalleryWindow({
+      x: M,
+      y: top,
+      w: W - rightW - M * 3,
+      h: colH,
+      title: `${CONFIG.agencyCode} // GALERÍA DE EXPEDIENTES — OBJETIVOS`,
+      tag: 'CLASIFICADO',
+      revealTime: 0.6,
+    })
+    gallery.id = 'gallery'
+    gallery.setTargets(galleryTargets)
+    scene.add(gallery, ctx)
+
+    const rx = W - rightW - M
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: colH,
+        title: 'REGISTRO DE OPERACIÓN',
+        tag: 'LIVE',
+        revealTime: 0.8,
+      },
+      { autoFeedEvery: ctx.config.scenes.gallery.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
   }
 
   function buildSensors(): void {
@@ -1292,6 +1430,12 @@ export function createOSApp(
     scene.add(studio, ctx)
   }
 
+  function buildSilence(): void {
+    const silence = new SilenceScene(ctx.config.scenes.silence.resetSeconds)
+    silence.id = 'silence'
+    scene.add(silence, ctx)
+  }
+
   const instance = new p5(sketch, container)
 
   function applyTheme(key: PaletteKey) {
@@ -1368,6 +1512,80 @@ export function createOSApp(
       case 'map-remove-unit':
         widgetById('map', MapWindow)?.removeUnit()
         log('UNIDAD RETIRADA DEL SECTOR', 'dim')
+        break
+      // --- geo -----------------------------------------------------------
+      case 'geo-new-target':
+        widgetById('geo', GeoMapWindow)?.newTarget()
+        log('SEÑAL GPS READQUIRIDA — OBJETIVO REUBICADO', 'warn')
+        break
+      case 'geo-chase':
+        widgetById('geo', GeoMapWindow)?.setMode('chase')
+        log('ORDEN EMITIDA: INTERCEPTAR AL OBJETIVO', 'danger')
+        break
+      case 'geo-patrol':
+        widgetById('geo', GeoMapWindow)?.setMode('patrol')
+        log('UNIDADES DE VUELTA A PATRULLA DE SECTOR', 'ok')
+        break
+      case 'geo-follow': {
+        const on = widgetById('geo', GeoMapWindow)?.toggleFollow()
+        if (on !== undefined) {
+          log(on ? 'CÁMARA FIJADA AL OBJETIVO' : 'CÁMARA EN POSICIÓN FIJA', 'dim')
+        }
+        break
+      }
+      case 'geo-zoom-in':
+        widgetById('geo', GeoMapWindow)?.zoomBy(1)
+        break
+      case 'geo-zoom-out':
+        widgetById('geo', GeoMapWindow)?.zoomBy(-1)
+        break
+      case 'geo-city': {
+        const label = widgetById('geo', GeoMapWindow)?.nextCity()
+        if (label) log(`ENLACE REPOSICIONADO — OP. ${label}`, 'info')
+        break
+      }
+      case 'geo-add-unit':
+        widgetById('geo', GeoMapWindow)?.addUnit()
+        log('UNIDAD ADICIONAL EN CAMPO', 'info')
+        break
+      case 'geo-remove-unit':
+        widgetById('geo', GeoMapWindow)?.removeUnit()
+        log('UNIDAD RETIRADA DEL OPERATIVO', 'dim')
+        break
+      // --- gallery -------------------------------------------------------
+      case 'gallery-reroll': {
+        const g = widgetById('gallery', GalleryWindow)
+        if (g && g.count > 0) {
+          g.reroll()
+          log('EXPEDIENTES REGENERADOS — NUEVA FILIACIÓN', 'info')
+        } else log('NO HAY EXPEDIENTES CARGADOS', 'warn')
+        break
+      }
+      case 'gallery-silence-all': {
+        const g = widgetById('gallery', GalleryWindow)
+        if (g && g.count > 0) {
+          g.markAll('silenced')
+          log(`${g.count} OBJETIVOS MARCADOS COMO SILENCIADOS`, 'danger')
+        } else log('NO HAY EXPEDIENTES CARGADOS', 'warn')
+        break
+      }
+      case 'gallery-capture-all': {
+        const g = widgetById('gallery', GalleryWindow)
+        if (g && g.count > 0) {
+          g.markAll('captured')
+          log(`${g.count} OBJETIVOS MARCADOS COMO CAPTURADOS`, 'ok')
+        } else log('NO HAY EXPEDIENTES CARGADOS', 'warn')
+        break
+      }
+      case 'gallery-advance':
+        widgetById('gallery', GalleryWindow)?.advanceAll()
+        log('ESTADO DE EXPEDIENTES ACTUALIZADO', 'info')
+        break
+      case 'gallery-next-page':
+        widgetById('gallery', GalleryWindow)?.nextPage()
+        break
+      case 'gallery-prev-page':
+        widgetById('gallery', GalleryWindow)?.prevPage()
         break
       // --- sensores ----------------------------------------------------
       case 'sensor-quake':
@@ -1510,10 +1728,14 @@ export function createOSApp(
   /** Anything that can display a feed: surveillance panels + call tile. */
   function holderFor(
     slot: CamSlot,
-  ): SurveillancePanel | CallWindow | VideoEffectsStudio | undefined {
+  ): SurveillancePanel | CallWindow | VideoEffectsStudio | SilenceScene | undefined {
     if (slot === 'studio') {
       const e = scene.get('studio')
       return e instanceof VideoEffectsStudio ? e : undefined
+    }
+    if (slot === 'silence') {
+      const e = scene.get('silence')
+      return e instanceof SilenceScene ? e : undefined
     }
     if (slot === 'call-self') {
       const e = scene.get('call')
@@ -1546,6 +1768,35 @@ export function createOSApp(
       feed.vision = new VisionEngine()
     }
     holder.setFeed(feed)
+  }
+
+  /** Release the object URLs backing the current dossier board. */
+  function disposeGalleryTargets(): void {
+    for (const t of galleryTargets) URL.revokeObjectURL(t.url)
+    galleryTargets = []
+  }
+
+  /** Decode image files into dossiers and (re)populate the gallery. */
+  function loadGalleryImages(files: File[]): void {
+    const images = files.filter((f) => f.type.startsWith('image/'))
+    if (images.length === 0) {
+      controller.logLine('NINGUNA IMAGEN VÁLIDA EN LA SELECCIÓN', 'warn')
+      return
+    }
+    disposeGalleryTargets()
+    // Natural order so a picked folder reads in filename order.
+    images.sort((a, b) => a.name.localeCompare(b.name))
+    galleryTargets = images.map((file) => {
+      const url = URL.createObjectURL(file)
+      const img = new Image()
+      img.src = url
+      return buildDossier(img, url, file.name)
+    })
+    // Refresh a live gallery, or jump to the scene so the board shows.
+    const g = widgetById('gallery', GalleryWindow)
+    if (g) g.setTargets(galleryTargets)
+    else setPhase('gallery')
+    controller.logLine(`${galleryTargets.length} EXPEDIENTES CARGADOS EN LA GALERÍA`, 'ok')
   }
 
   function setVision(on: boolean): void {
@@ -1608,6 +1859,7 @@ export function createOSApp(
     useWebcam: async (slot = 'cam-a') =>
       swapFeed(slot, await VideoFeed.fromWebcam()),
     clearFeed: (slot = 'cam-a') => swapFeed(slot, new StaticFeed()),
+    loadGalleryImages: (files) => loadGalleryImages(files),
     setStudioEffects: (patch) => {
       widgetById('studio', VideoEffectsStudio)?.patchEffects(patch)
     },
@@ -1673,6 +1925,7 @@ export function createOSApp(
       destroyed = true
       sizeObserver.disconnect()
       disposeSceneFeeds()
+      disposeGalleryTargets()
       recorder.stop()
       instance.remove()
     },

@@ -68,6 +68,25 @@ const SCENE_ACTIONS: Partial<
     { id: 'map-add-unit', label: '+UNIDAD' },
     { id: 'map-remove-unit', label: '−UNIDAD' },
   ],
+  geo: [
+    { id: 'geo-new-target', label: 'MOVER OBJETIVO', title: 'Reubica la señal GPS del objetivo' },
+    { id: 'geo-chase', label: 'INTERCEPTAR', title: 'Las unidades convergen sobre el objetivo' },
+    { id: 'geo-patrol', label: 'PATRULLA', title: 'Las unidades vuelven a rondar el sector' },
+    { id: 'geo-follow', label: 'SEGUIR', title: 'Fija o libera la cámara sobre el objetivo' },
+    { id: 'geo-zoom-in', label: 'ZOOM+' },
+    { id: 'geo-zoom-out', label: 'ZOOM−' },
+    { id: 'geo-city', label: 'CIUDAD', title: 'Salta a la siguiente ciudad real' },
+    { id: 'geo-add-unit', label: '+UNIDAD' },
+    { id: 'geo-remove-unit', label: '−UNIDAD' },
+  ],
+  gallery: [
+    { id: 'gallery-silence-all', label: 'SILENCIAR TODO', title: 'Marca todos los objetivos como silenciados' },
+    { id: 'gallery-capture-all', label: 'CAPTURAR TODO', title: 'Marca todos los objetivos como capturados' },
+    { id: 'gallery-advance', label: 'AVANZAR ESTADO', title: 'Rota el estado de cada expediente' },
+    { id: 'gallery-reroll', label: 'REGENERAR', title: 'Nueva filiación aleatoria para cada ficha' },
+    { id: 'gallery-prev-page', label: '◀ PÁGINA' },
+    { id: 'gallery-next-page', label: 'PÁGINA ▶' },
+  ],
   sensors: [
     { id: 'sensor-quake', label: 'SISMO', title: 'Dispara la red sísmica' },
     { id: 'sensor-transmission', label: 'TRANSMISIÓN', title: 'Banda caliente en el espectro + RF' },
@@ -127,6 +146,7 @@ const VIDEO_TARGETS: Partial<
   analysis: [{ slot: 'cam-a', label: 'CÁMARA' }],
   call: [{ slot: 'call-self', label: 'LLAMADA' }],
   'video-effects': [{ slot: 'studio', label: 'STUDIO' }],
+  silence: [{ slot: 'silence', label: 'SILENCE' }],
 }
 
 const PHASES: { id: OSPhase; label: string }[] = [
@@ -135,6 +155,8 @@ const PHASES: { id: OSPhase; label: string }[] = [
   { id: 'hypervigilance', label: 'HYPERVIGILANCIA' },
   { id: 'desktop', label: 'VIGILANCIA' },
   { id: 'map', label: 'MAPA' },
+  { id: 'geo', label: 'GEO' },
+  { id: 'gallery', label: 'GALERÍA' },
   { id: 'sensors', label: 'SENSORES' },
   { id: 'call', label: 'LLAMADA' },
   { id: 'chip', label: 'CHIP' },
@@ -143,6 +165,7 @@ const PHASES: { id: OSPhase; label: string }[] = [
   { id: 'loyalty', label: 'LEALTAD' },
   { id: 'analysis', label: 'ANÁLISIS' },
   { id: 'video-effects', label: 'FX STUDIO' },
+  { id: 'silence', label: 'SILENCE' },
 ]
 
 const STUDIO_SLIDERS: {
@@ -220,6 +243,8 @@ export default function ControlPanel({
   // Panel position: null = CSS default (bottom-right); set once dragged.
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const imagesRef = useRef<HTMLInputElement>(null)
+  const folderRef = useRef<HTMLInputElement>(null)
   const slotRef = useRef<CamSlot>('cam-a')
   const panelRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
@@ -385,6 +410,21 @@ export default function ControlPanel({
   const pickVideo = (slot: CamSlot) => {
     slotRef.current = slot
     fileRef.current?.click()
+  }
+
+  // Folder selection needs the non-standard webkitdirectory attribute,
+  // which React won't type — set it imperatively once.
+  useEffect(() => {
+    const el = folderRef.current
+    if (el) {
+      el.setAttribute('webkitdirectory', '')
+      el.setAttribute('directory', '')
+    }
+  }, [])
+
+  const loadGallery = (list: FileList | null) => {
+    const files = list ? Array.from(list) : []
+    if (files.length) controller.loadGalleryImages(files)
   }
 
   const countInOverlay =
@@ -567,6 +607,18 @@ export default function ControlPanel({
           </button>
         ))}
       </div>
+
+      {phase === 'gallery' && (
+        <div className="ctrl-row">
+          <span className="ctrl-label">EXPEDIENTES</span>
+          <button type="button" onClick={() => imagesRef.current?.click()}>
+            CARGAR IMÁGENES
+          </button>
+          <button type="button" onClick={() => folderRef.current?.click()}>
+            CARGAR CARPETA
+          </button>
+        </div>
+      )}
 
       {SCENE_ACTIONS[phase] && (
         <div className="ctrl-row">
@@ -892,6 +944,30 @@ export default function ControlPanel({
         onChange={(e) => {
           const f = e.target.files?.[0]
           if (f) controller.loadVideoFile(f, slotRef.current)
+          e.target.value = ''
+        }}
+      />
+
+      <input
+        ref={imagesRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          loadGallery(e.target.files)
+          e.target.value = ''
+        }}
+      />
+
+      <input
+        ref={folderRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          loadGallery(e.target.files)
           e.target.value = ''
         }}
       />
