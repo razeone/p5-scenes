@@ -95,12 +95,6 @@ export interface StudioMediaState {
   paused: boolean
 }
 
-function buildSilence(): void {
-  const silence = new SilenceScene(ctx.config.scenes.silence.resetSeconds)
-  silence.id = 'silence'
-  scene.add(silence, ctx)
-}
-
 /** A finished take with its slate number, for the session take list. */
 export type SavedTake = TakeInfo & { take: number }
 
@@ -216,10 +210,6 @@ export interface OSController {
   /** Number of the last take recorded this session (0 = none yet). */
   getTake(): number
   destroy(): void
-}
-if (slot === 'silence') {
-  const e = scene.get('silence')
-  return e instanceof SilenceScene ? e : undefined
 }
 
 /** Callbacks so the React shell can reflect internal state changes. */
@@ -451,7 +441,7 @@ export function createOSApp(
     ctx.width = w
     ctx.height = h
     ctx.p.resizeCanvas(w, h)
-    if (scene.phase === 'video-effects') return
+    if (scene.phase === 'video-effects' || scene.phase === 'silence') return
     setPhase(scene.phase)
   }
 
@@ -1312,6 +1302,12 @@ export function createOSApp(
     scene.add(studio, ctx)
   }
 
+  function buildSilence(): void {
+    const silence = new SilenceScene(ctx.config.scenes.silence.resetSeconds)
+    silence.id = 'silence'
+    scene.add(silence, ctx)
+  }
+
   const instance = new p5(sketch, container)
 
   function applyTheme(key: PaletteKey) {
@@ -1530,10 +1526,14 @@ export function createOSApp(
   /** Anything that can display a feed: surveillance panels + call tile. */
   function holderFor(
     slot: CamSlot,
-  ): SurveillancePanel | CallWindow | VideoEffectsStudio | undefined {
+  ): SurveillancePanel | CallWindow | VideoEffectsStudio | SilenceScene | undefined {
     if (slot === 'studio') {
       const e = scene.get('studio')
       return e instanceof VideoEffectsStudio ? e : undefined
+    }
+    if (slot === 'silence') {
+      const e = scene.get('silence')
+      return e instanceof SilenceScene ? e : undefined
     }
     if (slot === 'call-self') {
       const e = scene.get('call')

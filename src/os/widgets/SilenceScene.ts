@@ -8,9 +8,11 @@ import { VideoFeed } from '../media/VideoSource'
 export class SilenceScene extends Entity {
   feed: FeedSource = new StaticFeed()
   private silencedAt: number | null = null
+  private readonly resetSeconds: number
 
-  constructor(private readonly resetSeconds: number) {
+  constructor(resetSeconds: number) {
     super()
+    this.resetSeconds = resetSeconds
   }
 
   setFeed(feed: FeedSource): void {
