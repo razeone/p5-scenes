@@ -127,6 +127,7 @@ const VIDEO_TARGETS: Partial<
   analysis: [{ slot: 'cam-a', label: 'CÁMARA' }],
   call: [{ slot: 'call-self', label: 'LLAMADA' }],
   'video-effects': [{ slot: 'studio', label: 'STUDIO' }],
+  silence: [{ slot: 'silence', label: 'SILENCE' }],
 }
 
 const PHASES: { id: OSPhase; label: string }[] = [
@@ -143,6 +144,7 @@ const PHASES: { id: OSPhase; label: string }[] = [
   { id: 'loyalty', label: 'LEALTAD' },
   { id: 'analysis', label: 'ANÁLISIS' },
   { id: 'video-effects', label: 'FX STUDIO' },
+  { id: 'silence', label: 'SILENCE' },
 ]
 
 const STUDIO_SLIDERS: {

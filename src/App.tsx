@@ -43,7 +43,14 @@ function App() {
       setDragging(false)
       const file = e.dataTransfer.files?.[0]
       if (file && file.type.startsWith('video/')) {
-        controller?.loadVideoFile(file, phase === 'video-effects' ? 'studio' : 'cam-a')
+        controller?.loadVideoFile(
+          file,
+          phase === 'video-effects'
+            ? 'studio'
+            : phase === 'silence'
+              ? 'silence'
+              : 'cam-a',
+        )
       }
     },
     [controller, phase],

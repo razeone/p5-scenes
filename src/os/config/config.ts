@@ -170,6 +170,10 @@ export interface OSConfig {
       recoverySeconds: number
       logEvery: number
     }
+    silence: {
+      /** Seconds a silenced target remains frozen before reset. */
+      resetSeconds: number
+    }
   }
 }
 
@@ -280,6 +284,9 @@ export const CONFIG: OSConfig = {
       arrestSeconds: 5,
       recoverySeconds: 6,
       logEvery: 1.7,
+    },
+    silence: {
+      resetSeconds: 10,
     },
   },
 }

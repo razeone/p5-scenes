@@ -23,6 +23,7 @@ export type OSPhase =
   | 'loyalty'
   | 'analysis'
   | 'video-effects'
+  | 'silence'
 
 export class SceneManager {
   private entities: Entity[] = []

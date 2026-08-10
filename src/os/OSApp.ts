@@ -74,6 +74,7 @@ import { CanvasRecorder, timestampSlug, type TakeInfo } from './media/Recorder'
 import { VisionEngine } from './vision/VisionEngine'
 import { Slate } from './widgets/Slate'
 import { HypervigilanceScene } from './widgets/HypervigilanceScene'
+import { SilenceScene } from './widgets/SilenceScene'
 import {
   DEFAULT_STUDIO_EFFECTS,
   STUDIO_PRESETS,
@@ -83,7 +84,7 @@ import {
 import type { LogLevel } from './widgets/TextStream'
 
 /** Slots the director can pipe video into (panels + the call's self tile). */
-export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio'
+export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio' | 'silence'
 export type StudioPreset = keyof typeof STUDIO_PRESETS
 
 export interface StudioMediaState {
@@ -92,6 +93,12 @@ export interface StudioMediaState {
   currentTime: number
   duration: number
   paused: boolean
+}
+
+function buildSilence(): void {
+  const silence = new SilenceScene(ctx.config.scenes.silence.resetSeconds)
+  silence.id = 'silence'
+  scene.add(silence, ctx)
 }
 
 /** A finished take with its slate number, for the session take list. */
@@ -209,6 +216,10 @@ export interface OSController {
   /** Number of the last take recorded this session (0 = none yet). */
   getTake(): number
   destroy(): void
+}
+if (slot === 'silence') {
+  const e = scene.get('silence')
+  return e instanceof SilenceScene ? e : undefined
 }
 
 /** Callbacks so the React shell can reflect internal state changes. */
@@ -393,7 +404,12 @@ export function createOSApp(
     p.mousePressed = (event?: object) => {
       if (event instanceof MouseEvent && event.target !== canvasEl) return
       const hit = windowAt(p.mouseX, p.mouseY, false)
-      if (!hit) return
+      if (!hit) {
+        if (scene.phase === 'silence') {
+          widgetById('silence', SilenceScene)?.click(ctx)
+        }
+        return
+      }
       scene.bringToFront(hit)
       setFocused(hit)
       if (hit.draggable && hit.titleBarContains(p.mouseX, p.mouseY)) {
@@ -496,6 +512,9 @@ export function createOSApp(
       case 'video-effects':
         buildVideoEffects()
         break
+      case 'silence':
+        buildSilence()
+        break
     }
     hooks.onPhaseChange?.(phase)
   }
@@ -550,7 +569,8 @@ export function createOSApp(
       const feed =
         entity instanceof SurveillancePanel ||
         entity instanceof CallWindow ||
-        entity instanceof VideoEffectsStudio
+        entity instanceof VideoEffectsStudio ||
+        entity instanceof SilenceScene
           ? entity.feed
           : null
       if (feed instanceof VideoFeed && !disposed.has(feed)) {

@@ -59,7 +59,7 @@ a manual walkthrough plus a scripted CDP smoke test.
    field.
 3. On the desktop, exercise the director panel (bottom right):
    - **ESCENA** — jump straight to any scene for retakes: BOOT, LOGIN,
-     HYPERVIGILANCIA, VIGILANCIA, MAPA, SENSORES, LLAMADA.
+     HYPERVIGILANCIA, VIGILANCIA, MAPA, SENSORES, LLAMADA, SILENCE.
    - **TIEMPO** — a live scene-clock timecode (`mm:ss.d`), play, pause,
      advance one frame, advance one second, reset the scene clock, and
      change playback speed (the slider shows its value; a `1×` button
@@ -79,6 +79,9 @@ a manual walkthrough plus a scripted CDP smoke test.
      your webcam into the videocall's local tile (WEBCAM→LLAMADA);
      LIMPIAR drops everything back. Dragging a video file anywhere onto
      the canvas also feeds CAM-A.
+   - **SILENCE** — load a local video or webcam into the dedicated full-screen
+     target view. Click the target to freeze the footage and mark it
+     `SILENCED`; it resets after 10 seconds or on a second click.
    - **VISIÓN** — toggles object detection/tracking on the video feeds
      (also `Ctrl+I`; on by default). With footage of people, vehicles,
      or animals you should see bracket boxes acquire (`ADQUIRIENDO…`),
