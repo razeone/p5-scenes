@@ -16,6 +16,7 @@ export type OSPhase =
   | 'desktop'
   | 'map'
   | 'geo'
+  | 'gallery'
   | 'sensors'
   | 'call'
   | 'chip'

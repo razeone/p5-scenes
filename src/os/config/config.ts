@@ -103,6 +103,10 @@ export interface OSConfig {
       perimeterM: number
       logEvery: number
     }
+    gallery: {
+      /** Seconds between ambient log lines on the dossier board. */
+      logEvery: number
+    }
     sensors: {
       /** Time multiplier for scope traces (1 = normal, 2 = frantic). */
       traceSpeed: number
@@ -252,6 +256,9 @@ export const CONFIG: OSConfig = {
       trailSeconds: 120,
       perimeterM: 1500,
       logEvery: 1.4,
+    },
+    gallery: {
+      logEvery: 2.2,
     },
     sensors: {
       traceSpeed: 1,
