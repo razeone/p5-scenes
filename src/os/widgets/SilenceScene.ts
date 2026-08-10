@@ -40,9 +40,8 @@ export class SilenceScene extends Entity {
 
   draw(ctx: OSContext): void {
     const { p, width, height } = ctx
-    this.feed.draw(ctx, { x: 0, y: 0, w: width, h: height })
-
     p.push()
+    this.feed.draw(ctx, { x: 0, y: 0, w: width, h: height })
     p.noFill()
     strokeHex(p, ctx.palette.fgDim, 180)
     p.strokeWeight(1)
