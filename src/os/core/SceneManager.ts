@@ -15,6 +15,7 @@ export type OSPhase =
   | 'hypervigilance'
   | 'desktop'
   | 'map'
+  | 'geo'
   | 'sensors'
   | 'call'
   | 'chip'

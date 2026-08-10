@@ -29,6 +29,7 @@ import { RadarWindow } from './widgets/RadarWindow'
 import { StatusBar } from './widgets/StatusBar'
 import { OSWindow } from './widgets/OSWindow'
 import { MapWindow } from './widgets/MapWindow'
+import { GeoMapWindow } from './widgets/GeoMapWindow'
 import {
   ScopeWindow,
   SpectrogramWindow,
@@ -114,6 +115,16 @@ export type SceneAction =
   | 'map-patrol'
   | 'map-add-unit'
   | 'map-remove-unit'
+  // geo (rastreo sobre mapa real)
+  | 'geo-new-target'
+  | 'geo-chase'
+  | 'geo-patrol'
+  | 'geo-follow'
+  | 'geo-zoom-in'
+  | 'geo-zoom-out'
+  | 'geo-city'
+  | 'geo-add-unit'
+  | 'geo-remove-unit'
   // sensores
   | 'sensor-quake'
   | 'sensor-transmission'
@@ -478,6 +489,9 @@ export function createOSApp(
       case 'map':
         buildMap()
         break
+      case 'geo':
+        buildGeo()
+        break
       case 'sensors':
         buildSensors()
         break
@@ -774,6 +788,55 @@ export function createOSApp(
         revealTime: 0.8,
       },
       { autoFeedEvery: ctx.config.scenes.map.logEvery },
+    )
+    log.id = 'log'
+    scene.add(log, ctx)
+    scene.add(
+      new RadarWindow({
+        x: rx,
+        y: top + logH + M,
+        w: rightW,
+        h: colH - logH - M,
+        title: 'RASTREO AÉREO',
+        tag: 'DRON-3',
+        revealTime: 1.0,
+      }),
+      ctx,
+    )
+  }
+
+  function buildGeo(): void {
+    const W = ctx.width
+    const H = ctx.height
+    const { top, M } = addStatusBar()
+    const rightW = Math.max(280, W * 0.24)
+    const colH = H - top - M
+
+    const geo = new GeoMapWindow({
+      x: M,
+      y: top,
+      w: W - rightW - M * 3,
+      h: colH,
+      title: `${CONFIG.agencyCode} // RASTREO GEOESPACIAL — GPS EN VIVO`,
+      tag: 'SAT',
+      revealTime: 0.6,
+    })
+    geo.id = 'geo'
+    scene.add(geo, ctx)
+
+    const rx = W - rightW - M
+    const logH = colH * 0.55
+    const log = new ConsoleWindow(
+      {
+        x: rx,
+        y: top,
+        w: rightW,
+        h: logH,
+        title: 'ENLACE SATELITAL',
+        tag: 'LIVE',
+        revealTime: 0.8,
+      },
+      { autoFeedEvery: ctx.config.scenes.geo.logEvery },
     )
     log.id = 'log'
     scene.add(log, ctx)
@@ -1384,6 +1447,45 @@ export function createOSApp(
       case 'map-remove-unit':
         widgetById('map', MapWindow)?.removeUnit()
         log('UNIDAD RETIRADA DEL SECTOR', 'dim')
+        break
+      // --- geo -----------------------------------------------------------
+      case 'geo-new-target':
+        widgetById('geo', GeoMapWindow)?.newTarget()
+        log('SEÑAL GPS READQUIRIDA — OBJETIVO REUBICADO', 'warn')
+        break
+      case 'geo-chase':
+        widgetById('geo', GeoMapWindow)?.setMode('chase')
+        log('ORDEN EMITIDA: INTERCEPTAR AL OBJETIVO', 'danger')
+        break
+      case 'geo-patrol':
+        widgetById('geo', GeoMapWindow)?.setMode('patrol')
+        log('UNIDADES DE VUELTA A PATRULLA DE SECTOR', 'ok')
+        break
+      case 'geo-follow': {
+        const on = widgetById('geo', GeoMapWindow)?.toggleFollow()
+        if (on !== undefined) {
+          log(on ? 'CÁMARA FIJADA AL OBJETIVO' : 'CÁMARA EN POSICIÓN FIJA', 'dim')
+        }
+        break
+      }
+      case 'geo-zoom-in':
+        widgetById('geo', GeoMapWindow)?.zoomBy(1)
+        break
+      case 'geo-zoom-out':
+        widgetById('geo', GeoMapWindow)?.zoomBy(-1)
+        break
+      case 'geo-city': {
+        const label = widgetById('geo', GeoMapWindow)?.nextCity()
+        if (label) log(`ENLACE REPOSICIONADO — OP. ${label}`, 'info')
+        break
+      }
+      case 'geo-add-unit':
+        widgetById('geo', GeoMapWindow)?.addUnit()
+        log('UNIDAD ADICIONAL EN CAMPO', 'info')
+        break
+      case 'geo-remove-unit':
+        widgetById('geo', GeoMapWindow)?.removeUnit()
+        log('UNIDAD RETIRADA DEL OPERATIVO', 'dim')
         break
       // --- sensores ----------------------------------------------------
       case 'sensor-quake':
