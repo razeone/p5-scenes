@@ -17,9 +17,9 @@ import type { FeedSource } from './FeedSource'
 import type { VisionEngine } from '../vision/VisionEngine'
 
 export class VideoFeed implements FeedSource {
-  readonly label: string
   /** Live object detection/tracking; attached by the director. */
   vision: VisionEngine | null = null
+  private name: string
   private video: HTMLVideoElement
   private objectUrl?: string
   private stream?: MediaStream
@@ -28,22 +28,38 @@ export class VideoFeed implements FeedSource {
 
   private constructor(video: HTMLVideoElement, label: string) {
     this.video = video
-    this.label = label
+    this.name = label
+  }
+
+  get label(): string {
+    return this.name
   }
 
   /** Footage from a dropped/picked file. Loops for endless takes. */
   static fromFile(file: File): VideoFeed {
     const video = document.createElement('video')
-    const url = URL.createObjectURL(file)
-    video.src = url
     video.muted = true
     video.loop = true
     video.playsInline = true
-    // dispose() can pause before play() resolves — that abort is fine.
-    video.play().catch(() => {})
-    const feed = new VideoFeed(video, `ARCHIVO // ${file.name.toUpperCase()}`)
-    feed.objectUrl = url
+    const feed = new VideoFeed(video, '')
+    feed.setFile(file)
     return feed
+  }
+
+  /**
+   * Point the same element at a different file. The video wall cuts every
+   * few seconds; building a fresh <video> per cut churned decoders and
+   * made the cut stutter, so each screen keeps one element for the whole
+   * playlist. No-op on a webcam feed — there is no file to swap.
+   */
+  setFile(file: File): void {
+    if (this.stream) return
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
+    this.objectUrl = URL.createObjectURL(file)
+    this.name = `ARCHIVO // ${file.name.toUpperCase()}`
+    this.video.src = this.objectUrl
+    // dispose() can pause before play() resolves — that abort is fine.
+    this.video.play().catch(() => {})
   }
 
   /** Live camera. */

@@ -25,7 +25,66 @@ export type OSPhase =
   | 'loyalty'
   | 'analysis'
   | 'video-effects'
+  | 'vr-vision'
   | 'silence'
+
+/**
+ * Display name per phase — the single source of truth for the director
+ * panel's ESCENA row, the burned-in slate, and take filenames, so a clip
+ * in the edit bin carries the same scene name the director pressed.
+ */
+export const PHASE_LABELS: Record<OSPhase, string> = {
+  boot: 'BOOT',
+  login: 'LOGIN',
+  hypervigilance: 'HYPERVIGILANCIA',
+  desktop: 'VIGILANCIA',
+  map: 'MAPA',
+  geo: 'GEO',
+  gallery: 'GALERÍA',
+  sensors: 'SENSORES',
+  call: 'LLAMADA',
+  chip: 'CHIP',
+  board: 'PLACA',
+  implant: 'IMPLANTE',
+  loyalty: 'LEALTAD',
+  analysis: 'ANÁLISIS',
+  'video-effects': 'FX-STUDIO',
+  'vr-vision': 'VR-VISION',
+  silence: 'SILENCE',
+}
+
+/** Phase order for the panel's ESCENA row (also the shoot's story order). */
+export const PHASE_ORDER: OSPhase[] = [
+  'boot',
+  'login',
+  'hypervigilance',
+  'desktop',
+  'map',
+  'geo',
+  'gallery',
+  'sensors',
+  'call',
+  'chip',
+  'board',
+  'implant',
+  'loyalty',
+  'analysis',
+  'video-effects',
+  'vr-vision',
+  'silence',
+]
+
+/** Filesystem-safe slug for filenames: accents stripped, spaces to dashes. */
+export function slugify(text: string): string {
+  return (
+    text
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // strip the accents NFD split off
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase() || 'sin-titulo'
+  )
+}
 
 export class SceneManager {
   private entities: Entity[] = []

@@ -34,17 +34,57 @@ export function drawBackground(ctx: OSContext): void {
   p.background(palette.bg)
 
   p.push()
-  strokeHex(p, palette.grid, 90)
+  strokeHex(p, palette.grid, 125)
   p.strokeWeight(1)
-  const step = 44
-  // Slow vertical drift so the grid feels alive on camera.
-  const drift = (ctx.t * 8) % step
+  const step = 56
+  const drift = (ctx.t * 5) % step
   for (let x = 0; x <= width; x += step) {
     p.line(x, 0, x, height)
   }
   for (let y = -step + drift; y <= height; y += step) {
     p.line(0, y, width, y)
   }
+
+  // Large structural divisions keep empty areas composed like a control wall.
+  strokeHex(p, palette.fgDim, 105)
+  p.strokeWeight(3)
+  const major = step * 4
+  for (let x = 0; x <= width; x += major) p.line(x, 0, x, height)
+  for (let y = -major + drift; y <= height; y += major) {
+    p.line(0, y, width, y)
+  }
+
+  p.noStroke()
+  fillHex(p, palette.fg, 175)
+  p.rect(0, 0, Math.max(70, width * 0.075), 8)
+  p.rect(width - Math.max(34, width * 0.03), height - 8, Math.max(34, width * 0.03), 8)
+  p.pop()
+}
+
+/** Palette-driven hard frame shared by windowed and full-screen scenes. */
+export function drawBrutalistFrame(ctx: OSContext): void {
+  const { p, palette, width, height } = ctx
+  const margin = Math.max(8, Math.min(width, height) * 0.012)
+  const mark = Math.max(18, Math.min(width, height) * 0.035)
+  p.push()
+  p.noFill()
+  strokeHex(p, palette.fg, 190)
+  p.strokeWeight(3)
+  p.rect(margin, margin, width - margin * 2, height - margin * 2)
+  p.strokeWeight(6)
+  for (const [x, y, sx, sy] of [
+    [margin, margin, 1, 1],
+    [width - margin, margin, -1, 1],
+    [margin, height - margin, 1, -1],
+    [width - margin, height - margin, -1, -1],
+  ] as const) {
+    p.line(x, y, x + mark * sx, y)
+    p.line(x, y, x, y + mark * sy)
+  }
+  p.noStroke()
+  fillHex(p, palette.fg, 210)
+  p.rect(margin, height - margin - 7, mark * 1.8, 7)
+  p.rect(width - margin - mark * 0.8, margin, mark * 0.8, 7)
   p.pop()
 }
 
@@ -127,6 +167,7 @@ export function drawFlickerAndGlitch(ctx: OSContext): void {
  * Full post chain in the right order. Call after the scene has drawn.
  */
 export function applyPost(ctx: OSContext): void {
+  drawBrutalistFrame(ctx)
   drawScanlines(ctx)
   drawVignette(ctx)
   drawFlickerAndGlitch(ctx)

@@ -193,6 +193,16 @@ export class GalleryWindow extends OSWindow {
     this.page = Math.max(0, this.page - 1)
   }
 
+  /** 1-based page number, for the director panel's readout. */
+  get pageNumber(): number {
+    return this.page + 1
+  }
+
+  /** How many dossiers are loaded on the board. */
+  get targetCount(): number {
+    return this.targets.length
+  }
+
   /** Click on a card cycles its individual status; returns the target. */
   clickBody(_ctx: OSContext, mx: number, my: number): GalleryTarget | null {
     for (const h of this.hits) {

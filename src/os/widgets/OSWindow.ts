@@ -109,40 +109,43 @@ export abstract class OSWindow extends Entity {
 
     p.push()
 
-    // Panel backing — slightly lifted from the desktop bg.
+    // Hard offset shadow and opaque backing give every module physical weight.
     p.noStroke()
-    fillHex(p, ctx.palette.bg, 220)
+    fillHex(p, a, this.focused ? 110 : 64)
+    p.rect(r.x + 6, r.y + 6, r.w, r.h)
+    fillHex(p, ctx.palette.bg, 248)
     p.rect(r.x, r.y, r.w, r.h)
 
-    // Frame + bracket corners — brighter when this window is focused.
-    enableGlow(ctx, a, this.focused ? 0.9 : 0.5)
-    strokeHex(p, a, this.focused ? 255 : 190)
-    p.strokeWeight(1)
+    // Thick square frame. Focus increases weight instead of adding softness.
+    enableGlow(ctx, a, this.focused ? 0.35 : 0.12)
+    strokeHex(p, a, this.focused ? 255 : 220)
+    p.strokeWeight(this.focused ? 4 : 2)
     p.noFill()
     p.rect(r.x, r.y, r.w, r.h)
-    this.brackets(ctx, r, a)
     disableGlow(ctx)
 
-    // Title bar.
+    // Solid title slab: primary hierarchy is color mass, not decoration.
     p.noStroke()
-    fillHex(p, a, 30)
+    fillHex(p, a, this.focused ? 255 : 225)
     p.rect(r.x, r.y, r.w, this.titleBarH)
-    strokeHex(p, a, 160)
+    strokeHex(p, ctx.palette.bg, 255)
+    p.strokeWeight(2)
     p.line(r.x, r.y + this.titleBarH, right(r), r.y + this.titleBarH)
 
-    // Status dots.
+    // Square status lamps keep the machinery explicit and unsmoothed.
     const dotY = r.y + this.titleBarH / 2
     const dotColors = [ctx.palette.ok, ctx.palette.warn, ctx.palette.danger]
     for (let i = 0; i < 3; i++) {
       const blink = i === 0 ? 1 : 0.5 + 0.5 * Math.sin(ctx.t * 3 + i)
       fillHex(p, dotColors[i], 120 + blink * 135)
       p.noStroke()
-      p.circle(r.x + 12 + i * 12, dotY, 5)
+      p.rect(r.x + 9 + i * 11, dotY - 3, 7, 7)
     }
 
     // Title text, truncated so it never collides with the tag.
-    fillHex(p, a)
+    fillHex(p, ctx.palette.bg)
     p.textSize(12)
+    p.textStyle(p.BOLD)
     p.textAlign(p.LEFT, p.CENTER)
     const tagW = this.tag ? p.textWidth(this.tag.toUpperCase()) + 24 : 10
     p.text(
@@ -153,10 +156,14 @@ export abstract class OSWindow extends Entity {
 
     // Right-side tag.
     if (this.tag) {
+      p.noStroke()
+      fillHex(p, ctx.palette.bg, 230)
+      p.rect(right(r) - tagW, r.y + 4, tagW - 5, this.titleBarH - 8)
       p.textAlign(p.RIGHT, p.CENTER)
-      fillHex(p, ctx.palette.accent)
+      fillHex(p, a)
       p.text(this.tag.toUpperCase(), right(r) - 10, dotY + 1)
     }
+    p.textStyle(p.NORMAL)
 
     // Body, clipped to inner rect with reveal wipe.
     const body = inset(
@@ -177,23 +184,6 @@ export abstract class OSWindow extends Entity {
 
   static truncate = truncate
 
-  private brackets(ctx: OSContext, r: Rect, color: string): void {
-    const { p } = ctx
-    const L = 14
-    strokeHex(p, color)
-    p.strokeWeight(2)
-    p.noFill()
-    const corners: [number, number, number, number][] = [
-      [r.x, r.y, 1, 1],
-      [right(r), r.y, -1, 1],
-      [r.x, r.y + r.h, 1, -1],
-      [right(r), r.y + r.h, -1, -1],
-    ]
-    for (const [cx, cy, sx, sy] of corners) {
-      p.line(cx, cy, cx + L * sx, cy)
-      p.line(cx, cy, cx, cy + L * sy)
-    }
-  }
 }
 
 /** Cut text with an ellipsis to fit maxW at the current text size. */

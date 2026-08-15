@@ -224,6 +224,37 @@ export class GeoMapWindow extends OSWindow {
     this.zoomGoal = clamp(this.zoomGoal + delta, MIN_ZOOM, MAX_ZOOM)
   }
 
+  /**
+   * Point the operation at arbitrary real coordinates (the director types
+   * a location instead of cycling the presets). The city list gains the
+   * entry so CIUDAD can cycle back to it later in the shoot.
+   */
+  setLocation(lat: number, lon: number, label?: string): string {
+    const name =
+      label?.trim().toUpperCase() ||
+      `${Math.abs(lat).toFixed(3)}${lat >= 0 ? 'N' : 'S'} ${Math.abs(lon).toFixed(3)}${lon >= 0 ? 'E' : 'W'}`
+    const existing = GEO_CITIES.findIndex((c) => c.label === name)
+    if (existing >= 0) {
+      GEO_CITIES[existing] = { label: name, lat, lon }
+      this.cityIndex = existing
+    } else {
+      GEO_CITIES.push({ label: name, lat, lon })
+      this.cityIndex = GEO_CITIES.length - 1
+    }
+    if (this.started) {
+      this.scatter(this.target, 100, 600)
+      for (const u of this.units) this.scatter(u, 300, 1200)
+      this.cam = { lat: this.target.lat, lon: this.target.lon }
+      this.trail = [{ lat: this.target.lat, lon: this.target.lon }]
+    }
+    return name
+  }
+
+  /** Current zoom level, rounded for readouts. */
+  get zoomLevel(): number {
+    return Math.round(this.zoomGoal * 10) / 10
+  }
+
   /** Jump the whole operation to the next real city. */
   nextCity(): string {
     this.cityIndex = (this.cityIndex + 1) % GEO_CITIES.length

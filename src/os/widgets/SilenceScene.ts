@@ -15,6 +15,10 @@ export class SilenceScene extends Entity {
     this.resetSeconds = resetSeconds
   }
 
+  get silenced(): boolean {
+    return this.silencedAt !== null
+  }
+
   setFeed(feed: FeedSource): void {
     this.feed = feed
     this.reset()

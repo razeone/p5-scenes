@@ -1,8 +1,8 @@
 /**
  * Slate.ts — In-frame clapperboard burned into the first moments of a
- * recorded take: take number, OS identity, and a wall-clock stamp, so
- * footage is identifiable in the edit. Self-hides after its lifetime;
- * the next phase change clears the entity itself.
+ * recorded take: production title, scene, take number, and a wall-clock
+ * stamp, so a clip is identifiable in the edit without scrubbing it.
+ * Self-hides after its lifetime; the next phase change clears the entity.
  */
 
 import { Entity } from '../core/Entity'
@@ -16,10 +16,13 @@ export class Slate extends Entity {
 
   private take: number
   private lifetime: number
+  /** Scene name (PHASE_LABELS), shown under the take number. */
+  private scene: string
 
-  constructor(take: number, lifetime = 1.6) {
+  constructor(take: number, scene = '', lifetime = 1.6) {
     super()
     this.take = take
+    this.scene = scene
     this.lifetime = lifetime
   }
 
@@ -31,8 +34,8 @@ export class Slate extends Entity {
       return
     }
     const { p, palette } = ctx
-    const w = 340
-    const h = 130
+    const w = 380
+    const h = 168
     const x = (ctx.width - w) / 2
     const y = (ctx.height - h) / 2
     // Snap in bright, then settle.
@@ -51,10 +54,23 @@ export class Slate extends Entity {
     disableGlow(ctx)
 
     p.noStroke()
+    p.textAlign(p.CENTER, p.CENTER)
+
+    // Production title — what this footage belongs to.
+    fillHex(p, palette.accent, 235 * fade)
+    p.textSize(13)
+    p.text(ctx.config.movieTitle.toUpperCase(), x + w / 2, y + 26)
+
     fillHex(p, palette.fg, 255 * fade)
     p.textSize(34)
-    p.textAlign(p.CENTER, p.CENTER)
-    p.text(`TOMA ${String(this.take).padStart(2, '0')}`, x + w / 2, y + 46)
+    p.text(`TOMA ${String(this.take).padStart(2, '0')}`, x + w / 2, y + 64)
+
+    // Scene name: the editorial hook that used to be missing.
+    if (this.scene) {
+      fillHex(p, palette.fg, 225 * fade)
+      p.textSize(14)
+      p.text(`ESC. ${this.scene}`, x + w / 2, y + 96)
+    }
 
     fillHex(p, palette.fgDim, 220 * fade)
     p.textSize(11)
@@ -62,14 +78,14 @@ export class Slate extends Entity {
     p.text(
       `${ctx.config.osName}  ·  ${now.toLocaleDateString()} ${now.toTimeString().slice(0, 8)}`,
       x + w / 2,
-      y + 86,
+      y + 122,
     )
     // REC dot.
     fillHex(p, palette.danger, 255 * fade)
-    p.circle(x + w / 2 - 52, y + 106, 6)
+    p.circle(x + w / 2 - 52, y + 144, 6)
     fillHex(p, palette.danger, 220 * fade)
     p.textSize(10)
-    p.text('GRABANDO', x + w / 2 + 8, y + 106)
+    p.text('GRABANDO', x + w / 2 + 8, y + 144)
     p.pop()
   }
 }

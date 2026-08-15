@@ -119,13 +119,9 @@ export class VideoEffectsStudio extends Entity {
     this.effects = { ...DEFAULT_STUDIO_EFFECTS }
   }
 
-  update(ctx: OSContext): void {
-    if (!(this.feed instanceof VideoFeed)) return
-    this.feed.setPlaybackRate(ctx.clock.speed)
-    if (ctx.clock.mode === 'realtime' && ctx.clock.speed > 0) this.feed.play()
-    else this.feed.pause()
-    if (ctx.clock.mode === 'manual') this.feed.seek(ctx.clock.time)
-  }
+  // Transport sync (play/pause/rate/seek against the director clock) is
+  // applied to every feed centrally in OSApp's draw loop, so the studio
+  // no longer needs its own update pass.
 
   draw(ctx: OSContext): void {
     const { p, width, height } = ctx

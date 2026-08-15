@@ -161,6 +161,11 @@ export class DieMapWindow extends OSWindow {
     return LAYERS[this.activeLayer]
   }
 
+  /** Highlighted routing layer (M1–M5), for the panel's cue readout. */
+  get layerLabel(): string {
+    return LAYERS[this.activeLayer]
+  }
+
   /** Autorouter reruns: nets pick new endpoints, pulses sprint briefly. */
   reroute(): void {
     for (const n of this.nets) this.assignEndpoints(n)

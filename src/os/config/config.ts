@@ -76,7 +76,14 @@ export interface OSConfig {
       montageSeconds: number
       flareSeconds: number
       titleSeconds: number
+      /** Screens tiled across the wall (1 = one clip at a time, max 9). */
       activeScreens: number
+      /** Seconds a screen holds a clip before cutting to the next. */
+      holdSeconds: number
+      /** Seconds between neighbouring screens' cuts, so the wall rolls. */
+      stagger: number
+      /** Start the montage cutting by itself once footage is loaded. */
+      autoAdvance: boolean
     }
     map: {
       /** Patrol units on the board at build time (min 3, incl. 2 suspects). */
@@ -240,6 +247,9 @@ export const CONFIG: OSConfig = {
       flareSeconds: 0.8,
       titleSeconds: 3.2,
       activeScreens: 9,
+      holdSeconds: 4,
+      stagger: 0.7,
+      autoAdvance: true,
     },
     map: {
       units: 7,

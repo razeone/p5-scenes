@@ -18,7 +18,12 @@ import type {
   DirectorClockState,
   OSContext,
 } from './core/context'
-import { SceneManager, type OSPhase } from './core/SceneManager'
+import {
+  PHASE_LABELS,
+  SceneManager,
+  slugify,
+  type OSPhase,
+} from './core/SceneManager'
 import { drawBackground, applyPost } from './fx/Effects'
 import { BootSequence } from './widgets/BootSequence'
 import { LoginWindow } from './widgets/LoginWindow'
@@ -76,7 +81,14 @@ import {
 } from './widgets/AnalysisWindows'
 import { StaticFeed } from './media/FeedSource'
 import { VideoFeed } from './media/VideoSource'
-import { CanvasRecorder, timestampSlug, type TakeInfo } from './media/Recorder'
+import { VideoWall, type WallState } from './media/VideoWall'
+import {
+  CanvasRecorder,
+  canRecord,
+  timestampSlug,
+  type TakeContainer,
+  type TakeInfo,
+} from './media/Recorder'
 import { VisionEngine } from './vision/VisionEngine'
 import { Slate } from './widgets/Slate'
 import { HypervigilanceScene } from './widgets/HypervigilanceScene'
@@ -87,10 +99,24 @@ import {
   VideoEffectsStudio,
   type StudioEffects,
 } from './widgets/VideoEffectsStudio'
+import {
+  DEFAULT_VR_VISION_SETTINGS,
+  VrVisionScene,
+  type VrFrameStyle,
+  type VrMessageTone,
+  type VrVisionMessage,
+  type VrVisionSettings,
+} from './widgets/VrVisionScene'
 import type { LogLevel } from './widgets/TextStream'
 
 /** Slots the director can pipe video into (panels + the call's self tile). */
-export type CamSlot = 'cam-a' | 'cam-b' | 'call-self' | 'studio' | 'silence'
+export type CamSlot =
+  | 'cam-a'
+  | 'cam-b'
+  | 'call-self'
+  | 'studio'
+  | 'vr-vision'
+  | 'silence'
 export type StudioPreset = keyof typeof STUDIO_PRESETS
 
 export interface StudioMediaState {
@@ -101,8 +127,132 @@ export interface StudioMediaState {
   paused: boolean
 }
 
+export interface VrVisionState {
+  settings: VrVisionSettings
+  queue: VrVisionMessage[]
+  history: VrVisionMessage[]
+  active: VrVisionMessage | null
+}
+
+const VR_STORE_KEY = 'panopticon.vr-vision.v1'
+const VR_HISTORY_LIMIT = 50
+
+function loadVrVisionState(): VrVisionState {
+  const fallback: VrVisionState = {
+    settings: { ...DEFAULT_VR_VISION_SETTINGS },
+    queue: [],
+    history: [],
+    active: null,
+  }
+  try {
+    const raw = localStorage.getItem(VR_STORE_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<VrVisionState>
+    const settings = parsed.settings
+    const frameStyle = settings?.frameStyle
+    return {
+      settings: {
+        frameStyle:
+          frameStyle && ['optical', 'mechanical', 'photographic', 'clinical'].includes(frameStyle)
+            ? frameStyle
+            : fallback.settings.frameStyle,
+        showObjects: settings?.showObjects !== false,
+        showFaces: settings?.showFaces !== false,
+        showTelemetry: settings?.showTelemetry !== false,
+      },
+      queue: Array.isArray(parsed.queue) ? parsed.queue.slice(0, VR_HISTORY_LIMIT) : [],
+      history: Array.isArray(parsed.history)
+        ? parsed.history.slice(0, VR_HISTORY_LIMIT)
+        : [],
+      active: null,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function saveVrVisionState(state: VrVisionState): void {
+  try {
+    localStorage.setItem(
+      VR_STORE_KEY,
+      JSON.stringify({
+        settings: state.settings,
+        queue: state.queue.slice(0, VR_HISTORY_LIMIT),
+        history: state.history.slice(0, VR_HISTORY_LIMIT),
+      }),
+    )
+  } catch {
+    // Storage can be unavailable in private mode; runtime state still works.
+  }
+}
+
 /** A finished take with its slate number, for the session take list. */
-export type SavedTake = TakeInfo & { take: number }
+export type SavedTake = TakeInfo & {
+  take: number
+  /** Scene the take was shot in, for the bin label. */
+  scene: string
+  /** Circled = a keeper. The panel sets this; NG takes get discarded. */
+  kept?: boolean
+}
+
+/**
+ * Fixed capture formats. 'window' keeps the legacy behaviour (canvas
+ * follows the container, so takes vary with window size); the rest pin
+ * the canvas to a broadcast resolution and letterbox it on screen, so
+ * every take of a shoot cuts together at the same size.
+ */
+export type CaptureFormat =
+  | 'window'
+  | '1080p'
+  | '1440p'
+  | '4k'
+  | '1080p-vertical'
+
+export const CAPTURE_FORMATS: Record<
+  CaptureFormat,
+  { label: string; w: number; h: number }
+> = {
+  window: { label: 'VENTANA', w: 0, h: 0 },
+  '1080p': { label: '1080P', w: 1920, h: 1080 },
+  '1440p': { label: '1440P', w: 2560, h: 1440 },
+  '4k': { label: '4K', w: 3840, h: 2160 },
+  '1080p-vertical': { label: '9:16', w: 1080, h: 1920 },
+}
+
+/** What the panel needs to describe the capture chain in one glance. */
+export interface CaptureState {
+  format: CaptureFormat
+  /** Actual canvas backing-store size = what MediaRecorder encodes. */
+  width: number
+  height: number
+  container: TakeContainer
+  /** Container that will really be used (browser support may differ). */
+  effectiveContainer: TakeContainer | null
+  audio: boolean
+  autoDownload: boolean
+}
+
+/** Live per-slot media state, so the panel can show what's loaded where. */
+export interface SlotState {
+  slot: CamSlot
+  kind: 'none' | 'file' | 'webcam'
+  label: string
+}
+
+/**
+ * Snapshot of the current scene's toggle/mode state so cue buttons can
+ * render as active instead of looking like fire-and-forget one-shots.
+ * Keys are scene-specific (mode, follow, city, xray, layer…).
+ */
+export type SceneState = Record<string, string | number | boolean>
+
+/** Draw-loop liveness, for the frozen-canvas watchdog. */
+export interface HealthState {
+  frame: number
+  mode: DirectorClockState['mode']
+  /** Frames drawn since boot, independent of the director clock. */
+  drawn: number
+}
 
 /**
  * One-shot scene-specific direction cues. Each acts on the widgets of
@@ -173,6 +323,20 @@ export type SceneAction =
   | 'ana-dissent'
   | 'ana-pardon'
   | 'ana-reset'
+  // hipervigilancia (muro de video)
+  | 'hv-cut'
+  | 'hv-next'
+  | 'hv-prev'
+  | 'hv-auto'
+  | 'hv-shuffle'
+  | 'hv-mark'
+  | 'hv-hold'
+  | 'hv-title'
+  | 'hv-restart'
+  // vr-vision
+  | 'vr-cycle-frame'
+  | 'vr-send-next'
+  | 'vr-dismiss-message'
 
 export interface OSController {
   setTheme(key: PaletteKey): void
@@ -187,6 +351,8 @@ export interface OSController {
   reloadScene(): void
   /** Dispose current video sources and rebuild the current scene. */
   reloadMedia(): void
+  /** Re-run the scene's window layout, keeping loaded footage in place. */
+  relayout(): void
   /** Reset the current take and its scene-local timeline. */
   resetTake(): void
   /** Transport controls for rehearsal and deterministic rendering. */
@@ -204,6 +370,13 @@ export interface OSController {
   useWebcam(slot?: CamSlot): Promise<void>
   /** Drop a slot back to static. */
   clearFeed(slot?: CamSlot): void
+  /** What footage is loaded in each slot of the current scene. */
+  getSlots(): SlotState[]
+  /**
+   * Which camera slot sits under a viewport point (for drag-and-drop).
+   * Returns null when the point is over no feed-capable window.
+   */
+  slotAtPoint(clientX: number, clientY: number): CamSlot | null
   /** Load image files (folder or set) into the dossier gallery scene. */
   loadGalleryImages(files: File[]): void
   /** Patch or reset the full-screen studio's effect pipeline. */
@@ -211,12 +384,39 @@ export interface OSController {
   getStudioEffects(): StudioEffects
   applyStudioPreset(preset: StudioPreset): void
   getStudioMediaState(): StudioMediaState
+  /** Switch the immersive VR headset frame without rebuilding its feed. */
+  setVrFrameStyle(style: VrFrameStyle): void
+  getVrFrameStyle(): VrFrameStyle
+  setVrVisionSettings(patch: Partial<VrVisionSettings>): void
+  getVrVisionState(): VrVisionState
+  queueVrMessage(text: string, tone?: VrMessageTone, duration?: number): void
+  sendVrMessage(id?: string): void
+  dismissVrMessage(): void
+  removeVrMessage(id: string): void
+  replayVrMessage(id: string): void
+  clearVrHistory(): void
+  /**
+   * Load a folder (or a hand-picked set) of clips into the HIPERVIGILANCIA
+   * video wall. Non-video files are ignored; the wall jumps on screen if
+   * the shoot is somewhere else.
+   */
+  loadWallVideos(files: File[]): void
+  /** Empty the wall's bin and drop every screen back to static. */
+  clearWallVideos(): void
+  /** What the wall is playing, for the panel readout. */
+  getWallState(): WallState
+  /** Seconds a screen holds a clip, and the cut offset between screens. */
+  setWallPace(patch: { holdSeconds?: number; stagger?: number }): void
+  /** Re-tile the wall (1..9 screens) without restarting the take. */
+  setWallScreens(screens: number): void
   /** Toggle real object detection/tracking on the video feeds. */
   setVision(on: boolean): void
   isVisionOn(): boolean
   /** Live CRT ambience: scanlines, glow, vignette, flicker, glitch. */
   setCrt(patch: Partial<OSConfig['crt']>): void
   getCrt(): OSConfig['crt']
+  /** Restore the shipped CRT look (undo for slider experiments). */
+  resetCrt(): OSConfig['crt']
   /** Momentary heavy glitch/tear burst (scene transitions, hits). */
   glitchBurst(seconds?: number): void
   /** Push a line into the activity log (desktop phase). */
@@ -225,13 +425,25 @@ export interface OSController {
   announce(text: string, seconds?: number): void
   /** Fire a scene-specific direction cue (see SceneAction). */
   trigger(action: SceneAction): void
+  /** Active modes/toggles of the current scene, for cue button states. */
+  getSceneState(): SceneState
+  /** Point the GEO operation at real coordinates. */
+  setGeoLocation(lat: number, lon: number, label?: string): void
   /** Download a PNG still of the canvas. */
   screenshot(): void
-  /** Start capturing the canvas to a WebM take. */
+  /** Capture chain: fixed resolution, container, scratch audio. */
+  setCaptureFormat(format: CaptureFormat): void
+  setCaptureContainer(container: TakeContainer): void
+  setAudioCapture(on: boolean): Promise<void>
+  setAutoDownload(on: boolean): void
+  getCaptureState(): CaptureState
+  /** Start capturing the canvas to a take file. */
   startRecording(): void
-  /** Cut: finalize the take and auto-download it. */
+  /** Cut: finalize the take (kept in the session list for review). */
   stopRecording(): void
   isRecording(): boolean
+  /** Draw-loop liveness for the frozen-canvas watchdog. */
+  getHealth(): HealthState
   /** Number of the last take recorded this session (0 = none yet). */
   getTake(): number
   destroy(): void
@@ -297,10 +509,32 @@ export function createOSApp(
   // Loaded dossier images persist across scene rebuilds so switching
   // themes / phases and returning keeps the board intact.
   let galleryTargets: GalleryTarget[] = []
+  // The HIPERVIGILANCIA clip bin. Like the gallery, it outlives scene
+  // rebuilds so re-tiling the wall or hopping phases never means
+  // re-picking the folder.
+  const wall = new VideoWall()
+  wall.holdSeconds = CONFIG.scenes.hypervigilance.holdSeconds
+  wall.stagger = CONFIG.scenes.hypervigilance.stagger
+  wall.auto = CONFIG.scenes.hypervigilance.autoAdvance
+  // Frames actually drawn — the watchdog compares this over wall time to
+  // catch a p5 draw exception, which freezes the canvas silently.
+  let framesDrawn = 0
+  const vrVisionState = loadVrVisionState()
+  let vrMessageStartedAt = 0
+
+  // --- Capture chain ------------------------------------------------
+  // A fixed format pins the canvas to a broadcast resolution so every
+  // take of a shoot matches; 'window' keeps the legacy container-sized
+  // behaviour. Scene name goes into the filename and the slate.
+  let captureFormat: CaptureFormat = '1080p'
+  let captureContainer: TakeContainer = 'mp4'
+  let autoDownload = false
+  let micStream: MediaStream | null = null
 
   const recorder = new CanvasRecorder()
   recorder.onStateChange = (rec) => hooks.onRecordingChange?.(rec)
-  recorder.onTakeSaved = (info) => hooks.onTakeSaved?.({ ...info, take })
+  recorder.onTakeSaved = (info) =>
+    hooks.onTakeSaved?.({ ...info, take, scene: PHASE_LABELS[scene.phase] })
 
   const sketch = (p: p5) => {
     ctx.p = p
@@ -311,19 +545,25 @@ export function createOSApp(
         return
       }
       // Re-measure: the constructor may have run before first layout.
-      ctx.width = container.clientWidth || ctx.width
-      ctx.height = container.clientHeight || ctx.height
+      const size = targetSize()
+      ctx.width = size.w
+      ctx.height = size.h
       const c = p.createCanvas(ctx.width, ctx.height)
       c.parent(container)
       canvasEl = c.elt as HTMLCanvasElement
+      // 1 device pixel per sketch pixel: the capture resolution must be
+      // exactly what the director picked, not multiplied by DPR.
+      p.pixelDensity(1)
       p.frameRate(60)
       p.textFont('Courier New')
+      applyLetterbox()
       lastMs = p.millis()
       ready = true
       setPhase(pendingPhase ?? 'boot')
     }
 
     p.draw = () => {
+      framesDrawn++
       const now = p.millis()
       const wallDt = Math.min((now - lastMs) / 1000, 0.1)
       lastMs = now
@@ -343,6 +583,13 @@ export function createOSApp(
         speed: clockSpeed,
       }
       ctx.palette = PALETTES[themeKey]
+
+      // Footage obeys the director's transport everywhere, not just in
+      // the FX studio: PAUSA freezes the video too, VEL scrubs it.
+      syncFeedsToClock()
+      // The montage wall cuts on the same clock as everything else.
+      tickWall()
+      updateVrMessage()
 
       drawBackground(ctx)
       scene.update(ctx)
@@ -461,28 +708,64 @@ export function createOSApp(
     }
   }
 
+  /** Canvas size for the active format ('window' = follow the container). */
+  function targetSize(): { w: number; h: number } {
+    const fmt = CAPTURE_FORMATS[captureFormat]
+    if (fmt.w > 0) return { w: fmt.w, h: fmt.h }
+    return {
+      w: container.clientWidth || ctx.width || 1280,
+      h: container.clientHeight || ctx.height || 720,
+    }
+  }
+
   /**
-   * Adopt the container's real size. The container can change without a
-   * window resize (late stylesheet, layout shift), and phase layouts are
-   * computed from ctx dims — so on a genuine change, rebuild the current
-   * phase or windows keep the stale geometry (a collapsed container once
-   * gave the radar a negative radius and froze the draw loop).
+   * Fixed formats letterbox: the canvas keeps its capture resolution and
+   * CSS scales it to fit. The `fixed` class is what switches App.css from
+   * stretch-to-fill to contain-and-center.
+   */
+  function applyLetterbox(): void {
+    container.classList.toggle('fixed', CAPTURE_FORMATS[captureFormat].w > 0)
+  }
+
+  /**
+   * Adopt the target size. The container can change without a window
+   * resize (late stylesheet, layout shift), and phase layouts are computed
+   * from ctx dims — so on a genuine change, rebuild the current phase or
+   * windows keep stale geometry (a collapsed container once gave the radar
+   * a negative radius and froze the draw loop).
+   *
+   * While rolling, a resize is never allowed to rebuild the scene: that
+   * would wipe window positions, feeds and scene state mid-take. Fixed
+   * formats are immune anyway — only the letterbox scale changes.
    */
   function syncSize(): void {
     if (!ready) return
-    const w = container.clientWidth
-    const h = container.clientHeight
+    const { w, h } = targetSize()
     if (w < 2 || h < 2) return // mid-layout collapse; ignore
     if (w === ctx.width && h === ctx.height) return
+    if (recorder.recording) return // protect the take
     ctx.width = w
     ctx.height = h
     ctx.p.resizeCanvas(w, h)
     if (scene.phase === 'video-effects' || scene.phase === 'silence') return
-    setPhase(scene.phase)
+    rebuildPhase()
   }
 
   const sizeObserver = new ResizeObserver(() => syncSize())
   sizeObserver.observe(container)
+
+  /** Switch capture resolution: resize, re-letterbox, re-lay out. */
+  function setCaptureFormat(format: CaptureFormat): void {
+    if (format === captureFormat) return
+    captureFormat = format
+    applyLetterbox()
+    if (!ready) return
+    const { w, h } = targetSize()
+    ctx.width = w
+    ctx.height = h
+    ctx.p.resizeCanvas(w, h)
+    rebuildPhase()
+  }
 
   // ------------------------------------------------------------------
   // Phase staging
@@ -544,11 +827,22 @@ export function createOSApp(
       case 'video-effects':
         buildVideoEffects()
         break
+      case 'vr-vision':
+        buildVrVision()
+        break
       case 'silence':
         buildSilence()
         break
     }
+    // Session media bin: footage the director already loaded comes back
+    // automatically, so hopping scenes doesn't mean re-picking files.
+    restoreSlots()
     hooks.onPhaseChange?.(phase)
+  }
+
+  /** Rebuild the current scene (layout/format change), keeping footage. */
+  function rebuildPhase(): void {
+    setPhase(scene.phase)
   }
 
   function resetClock(): void {
@@ -595,20 +889,53 @@ export function createOSApp(
     clockSpeed = Math.max(0, Math.min(8, speed))
   }
 
-  function disposeSceneFeeds(): void {
-    const disposed = new Set<VideoFeed>()
+  /** Anything in the current scene that can display a feed. */
+  type FeedHolder =
+    | SurveillancePanel
+    | CallWindow
+    | VideoEffectsStudio
+    | VrVisionScene
+    | SilenceScene
+
+  function isFeedHolder(e: unknown): e is FeedHolder {
+    return (
+      e instanceof SurveillancePanel ||
+      e instanceof CallWindow ||
+      e instanceof VideoEffectsStudio ||
+      e instanceof VrVisionScene ||
+      e instanceof SilenceScene
+    )
+  }
+
+  /** Every distinct live VideoFeed in the scene (deduped: slots can share). */
+  function sceneFeeds(): VideoFeed[] {
+    const seen = new Set<VideoFeed>()
     for (const entity of scene.all) {
-      const feed =
-        entity instanceof SurveillancePanel ||
-        entity instanceof CallWindow ||
-        entity instanceof VideoEffectsStudio ||
-        entity instanceof SilenceScene
-          ? entity.feed
-          : null
-      if (feed instanceof VideoFeed && !disposed.has(feed)) {
-        disposed.add(feed)
-        feed.dispose()
-      }
+      if (!isFeedHolder(entity)) continue
+      const feed = entity.feed
+      if (feed instanceof VideoFeed) seen.add(feed)
+    }
+    return [...seen]
+  }
+
+  function disposeSceneFeeds(): void {
+    for (const feed of sceneFeeds()) feed.dispose()
+  }
+
+  /**
+   * Make every feed obey the director clock. Without this, PAUSA froze
+   * the fiction while real footage kept playing underneath and VEL only
+   * retimed the OS — the FX studio was the sole scene that matched.
+   */
+  function syncFeedsToClock(): void {
+    const silence = widgetById('silence', SilenceScene)
+    for (const feed of sceneFeeds()) {
+      feed.setPlaybackRate(clockSpeed)
+      const frozenBySilence = silence?.silenced && silence.feed === feed
+      if (frozenBySilence) feed.pause()
+      else if (clockMode === 'realtime' && clockSpeed > 0) feed.play()
+      else feed.pause()
+      if (clockMode === 'manual' && !frozenBySilence) feed.seek(clockTime)
     }
   }
 
@@ -620,12 +947,19 @@ export function createOSApp(
     }
   }
 
+  /**
+   * Where the content area starts under the shared top strip. Split out
+   * from addStatusBar() so a scene can re-lay its windows without adding
+   * a second status bar (the wall re-tiles in place).
+   */
+  const CONTENT_INSET = { top: 34 + 16, M: 16 }
+
   /** Shared top strip + the content area below it. */
   function addStatusBar(): { top: number; M: number } {
     const bar = new StatusBar()
     bar.id = 'status'
     scene.add(bar, ctx)
-    return { top: 34 + 16, M: 16 }
+    return CONTENT_INSET
   }
 
   function buildBoot(): void {
@@ -653,6 +987,33 @@ export function createOSApp(
 
   function buildHypervigilance(): void {
     const { top, M } = addStatusBar()
+    addWallScreens(top, M)
+    layoutWall()
+
+    const cinematic = new HypervigilanceScene({
+      title: ctx.config.movieTitle,
+      montageSeconds: ctx.config.scenes.hypervigilance.montageSeconds,
+      flareSeconds: ctx.config.scenes.hypervigilance.flareSeconds,
+      titleSeconds: ctx.config.scenes.hypervigilance.titleSeconds,
+      onComplete: () => setPhase('desktop'),
+    })
+    cinematic.id = 'hypervigilance'
+    cinematic.z = 100
+    scene.add(cinematic, ctx)
+  }
+
+  // ------------------------------------------------------------------
+  // HIPERVIGILANCIA video wall
+  //
+  // The wall is a grid of surveillance panels fed by a clip bin the
+  // director loads from a folder (see VideoWall). Panels are addressed by
+  // wall order, `hv-screen-1..N`, and are deliberately outside the CamSlot
+  // system: slots are single named cameras the director aims by hand,
+  // while the wall is one playlist driving every screen at once.
+  // ------------------------------------------------------------------
+
+  /** Wall geometry from the current screen count. Also used by re-tiling. */
+  function addWallScreens(top: number, M: number): void {
     const count = Math.max(
       1,
       Math.min(9, ctx.config.scenes.hypervigilance.activeScreens),
@@ -682,17 +1043,97 @@ export function createOSApp(
       panel.id = `hv-screen-${i + 1}`
       scene.add(panel, ctx)
     }
+  }
 
-    const cinematic = new HypervigilanceScene({
-      title: ctx.config.movieTitle,
-      montageSeconds: ctx.config.scenes.hypervigilance.montageSeconds,
-      flareSeconds: ctx.config.scenes.hypervigilance.flareSeconds,
-      titleSeconds: ctx.config.scenes.hypervigilance.titleSeconds,
-      onComplete: () => setPhase('desktop'),
-    })
-    cinematic.id = 'hypervigilance'
-    cinematic.z = 100
-    scene.add(cinematic, ctx)
+  /** The wall's panels in wall order (empty in every other scene). */
+  function wallPanels(): SurveillancePanel[] {
+    const panels: SurveillancePanel[] = []
+    for (let i = 1; i <= 9; i++) {
+      const panel = widgetById(`hv-screen-${i}`, SurveillancePanel)
+      if (!panel) break
+      panels.push(panel)
+    }
+    return panels
+  }
+
+  /**
+   * Put a screen on its clip. The panel's <video> element is reused
+   * across cuts — nine fresh decoders every four seconds is what made
+   * an early version of the wall hitch mid-take.
+   *
+   * Vision stays off here on purpose: one MediaPipe graph per screen
+   * would cost more than the whole rest of the frame, and the wall reads
+   * as surveillance from the fake tracking overlay alone.
+   */
+  function applyWallClip(panel: SurveillancePanel, screen: number): void {
+    const file = wall.clipAt(screen)
+    if (!file) return
+    const feed = panel.feed
+    if (feed instanceof VideoFeed) feed.setFile(file)
+    else panel.setFeed(VideoFeed.fromFile(file))
+  }
+
+  /** (Re)deal the bin across every screen and re-arm the holds. */
+  function layoutWall(): void {
+    const panels = wallPanels()
+    if (panels.length === 0) return
+    for (const screen of wall.layout(panels.length, ctx.t)) {
+      applyWallClip(panels[screen], screen)
+    }
+  }
+
+  /** Apply a set of cuts the wall just decided on. */
+  function applyWallCuts(cuts: number[]): void {
+    if (cuts.length === 0) return
+    const panels = wallPanels()
+    for (const screen of cuts) {
+      if (panels[screen]) applyWallClip(panels[screen], screen)
+    }
+  }
+
+  /**
+   * Auto-advance, driven from the draw loop on the director clock: PAUSA
+   * holds the cut and a slow VEL stretches the montage, so a take can be
+   * rehearsed frame by frame and still cut where it did in the rehearsal.
+   */
+  function tickWall(): void {
+    if (scene.phase !== 'hypervigilance') return
+    applyWallCuts(wall.update(ctx.t))
+  }
+
+  /** Re-tile in place — rebuilding the phase would reset the take. */
+  function setWallScreens(screens: number): void {
+    const next = Math.max(1, Math.min(9, Math.round(screens)))
+    const cfg = ctx.config.scenes.hypervigilance
+    if (next === cfg.activeScreens) return
+    cfg.activeScreens = next
+    if (scene.phase !== 'hypervigilance') return
+    for (const panel of wallPanels()) {
+      if (panel.feed instanceof VideoFeed) panel.feed.dispose()
+      scene.remove(panel)
+    }
+    addWallScreens(CONTENT_INSET.top, CONTENT_INSET.M)
+    layoutWall()
+  }
+
+  function loadWallVideos(files: File[]): void {
+    const loaded = wall.load(files)
+    if (loaded === 0) {
+      controller.logLine('NINGÚN VIDEO VÁLIDO EN LA SELECCIÓN', 'warn')
+      return
+    }
+    // setPhase rebuilds the wall, which deals the new bin on its own.
+    if (scene.phase !== 'hypervigilance') setPhase('hypervigilance')
+    else layoutWall()
+    controller.logLine(`${loaded} CLIPS EN EL MURO DE VIGILANCIA`, 'ok')
+  }
+
+  function clearWallVideos(): void {
+    wall.clear()
+    for (const panel of wallPanels()) {
+      if (panel.feed instanceof VideoFeed) panel.feed.dispose()
+      panel.setFeed(new StaticFeed())
+    }
   }
 
   function buildDesktop(): void {
@@ -1430,6 +1871,31 @@ export function createOSApp(
     scene.add(studio, ctx)
   }
 
+  function buildVrVision(): void {
+    const vrVision = new VrVisionScene()
+    vrVision.id = 'vr-vision'
+    vrVision.patchSettings(vrVisionState.settings)
+    vrVision.setActiveMessage(vrVisionState.active)
+    if (vrVisionState.active) vrMessageStartedAt = ctx.t
+    scene.add(vrVision, ctx)
+  }
+
+  function syncVrVisionScene(): void {
+    const vrVision = widgetById('vr-vision', VrVisionScene)
+    vrVision?.patchSettings(vrVisionState.settings)
+    vrVision?.setActiveMessage(vrVisionState.active)
+  }
+
+  function updateVrMessage(): void {
+    const active = vrVisionState.active
+    if (!active || ctx.t - vrMessageStartedAt < active.duration) return
+    vrVisionState.history.unshift(active)
+    vrVisionState.history = vrVisionState.history.slice(0, VR_HISTORY_LIMIT)
+    vrVisionState.active = null
+    syncVrVisionScene()
+    saveVrVisionState(vrVisionState)
+  }
+
   function buildSilence(): void {
     const silence = new SilenceScene(ctx.config.scenes.silence.resetSeconds)
     silence.id = 'silence'
@@ -1453,6 +1919,34 @@ export function createOSApp(
   let visionOn = true
   let glitchBurstUntil = 0
   let take = 0
+
+  /**
+   * Session media bin: what the director last pointed at each slot. Scene
+   * rebuilds dispose the live <video> elements, so without this every
+   * scene hop meant re-picking the same file from disk.
+   */
+  type SlotSource =
+    | { kind: 'file'; file: File; label: string }
+    | { kind: 'webcam'; label: string }
+  const slotSources = new Map<CamSlot, SlotSource>()
+
+  /** Re-attach remembered footage to whichever slots the scene provides. */
+  function restoreSlots(): void {
+    for (const [slot, source] of slotSources) {
+      if (!holderFor(slot)) continue // this scene has no such slot
+      if (source.kind === 'file') {
+        swapFeed(slot, VideoFeed.fromFile(source.file))
+      } else {
+        // Permission is already granted, so this resolves without a prompt.
+        VideoFeed.fromWebcam()
+          .then((feed) => {
+            if (holderFor(slot)) swapFeed(slot, feed)
+            else feed.dispose()
+          })
+          .catch(() => slotSources.delete(slot))
+      }
+    }
+  }
 
   function panelFor(slot: CamSlot): SurveillancePanel | undefined {
     const e = scene.get(slot)
@@ -1722,13 +2216,175 @@ export function createOSApp(
         widgetById('live', LiveMetricsEntity)?.reset()
         log('CALIBRACIÓN REINICIADA — NUEVA LÍNEA BASE', 'info')
         break
+      // --- hipervigilancia (muro de video) ---------------------------------
+      case 'hv-cut': {
+        const screen = wall.cutOne(ctx.t)
+        if (screen < 0) {
+          log('MURO SIN MATERIAL — CARGA UNA CARPETA DE CLIPS', 'warn')
+          break
+        }
+        applyWallCuts([screen])
+        log(`NODO-${String(screen + 1).padStart(2, '0')}: NUEVA FUENTE EN CUADRO`, 'dim')
+        break
+      }
+      case 'hv-next':
+      case 'hv-prev': {
+        const dir = action === 'hv-next' ? 1 : -1
+        const cuts = wall.shift(dir, ctx.t)
+        if (cuts.length === 0) {
+          log('MURO SIN MATERIAL — CARGA UNA CARPETA DE CLIPS', 'warn')
+          break
+        }
+        applyWallCuts(cuts)
+        log(
+          `MURO EN CLIP ${wall.state().cursor}/${wall.count}`,
+          'info',
+        )
+        break
+      }
+      case 'hv-auto':
+        wall.auto = !wall.auto
+        // Re-arm from now, or every screen would cut at once on resume.
+        if (wall.auto) wall.reschedule(ctx.t)
+        log(
+          wall.auto ? 'MURO EN ROTACIÓN AUTOMÁTICA' : 'MURO CONGELADO — CORTE MANUAL',
+          wall.auto ? 'ok' : 'dim',
+        )
+        break
+      case 'hv-shuffle':
+        if (wall.empty) {
+          log('MURO SIN MATERIAL — CARGA UNA CARPETA DE CLIPS', 'warn')
+          break
+        }
+        wall.shuffle()
+        layoutWall()
+        log('ORDEN DE VIGILANCIA ALEATORIZADO', 'info')
+        break
+      case 'hv-mark': {
+        const panels = wallPanels()
+        if (panels.length === 0) break
+        const hit = panels[Math.floor(Math.random() * panels.length)]
+        hit.flashMark(cfg.vigilancia.markSeconds)
+        log('COINCIDENCIA BIOMÉTRICA EN EL MURO — EXPEDIENTE 4471', 'danger')
+        break
+      }
+      case 'hv-hold': {
+        const cinematic = widgetById('hypervigilance', HypervigilanceScene)
+        if (!cinematic) break
+        const held = cinematic.setHold(!cinematic.holding)
+        log(
+          held ? 'MONTAJE EN BUCLE — EL TÍTULO ESPERA' : 'MONTAJE LIBERADO',
+          held ? 'warn' : 'dim',
+        )
+        break
+      }
+      case 'hv-title':
+        widgetById('hypervigilance', HypervigilanceScene)?.fireTitle()
+        log('ENTRA TÍTULO', 'ok')
+        break
+      case 'hv-restart':
+        widgetById('hypervigilance', HypervigilanceScene)?.restartMontage()
+        layoutWall()
+        log('MONTAJE DESDE EL PRIMER CUADRO', 'info')
+        break
+      // --- vr-vision ------------------------------------------------------
+      case 'vr-cycle-frame': {
+        const styles: VrFrameStyle[] = [
+          'optical',
+          'mechanical',
+          'photographic',
+          'clinical',
+        ]
+        const index = styles.indexOf(vrVisionState.settings.frameStyle)
+        controller.setVrFrameStyle(styles[(index + 1) % styles.length])
+        break
+      }
+      case 'vr-send-next':
+        controller.sendVrMessage()
+        break
+      case 'vr-dismiss-message':
+        controller.dismissVrMessage()
+        break
     }
+  }
+
+  /**
+   * Modes/toggles the current scene is holding, so cue buttons can show
+   * state instead of pretending every cue is a one-shot.
+   */
+  function sceneStateSnapshot(): SceneState {
+    const state: SceneState = {}
+    switch (scene.phase) {
+      case 'hypervigilance': {
+        const w = wall.state()
+        state.auto = w.auto
+        state.clips = w.clips
+        state.clip = w.cursor
+        state.screens = w.screens
+        state.hold =
+          widgetById('hypervigilance', HypervigilanceScene)?.holding ?? false
+        break
+      }
+      case 'map': {
+        const m = widgetById('map', MapWindow)
+        if (m) state.mode = m.mode
+        break
+      }
+      case 'geo': {
+        const g = widgetById('geo', GeoMapWindow)
+        if (g) {
+          state.mode = g.mode
+          state.follow = g.follow
+          state.city = g.city.label
+          state.zoom = g.zoomLevel
+        }
+        break
+      }
+      case 'gallery': {
+        const g = widgetById('gallery', GalleryWindow)
+        if (g) {
+          state.page = g.pageNumber
+          state.dossiers = g.targetCount
+        }
+        break
+      }
+      case 'board': {
+        const b = widgetById('board', MotherboardWindow)
+        if (b) state.xray = b.xrayOn
+        break
+      }
+      case 'chip': {
+        const d = widgetById('die', DieMapWindow)
+        if (d) state.layer = d.layerLabel
+        break
+      }
+      case 'video-effects': {
+        const s = widgetById('studio', VideoEffectsStudio)
+        if (s) {
+          state.fit = s.effects.fit
+          state.mirror = s.effects.mirror
+          state.overlays = s.effects.overlays
+          state.trails = s.effects.trails
+          state.identify = s.effects.identify
+        }
+        break
+      }
+      case 'vr-vision':
+        state.frame = vrVisionState.settings.frameStyle
+        state.queued = vrVisionState.queue.length
+        state.messageActive = vrVisionState.active !== null
+        break
+      case 'silence':
+        state.silenced = widgetById('silence', SilenceScene)?.silenced ?? false
+        break
+    }
+    return state
   }
 
   /** Anything that can display a feed: surveillance panels + call tile. */
   function holderFor(
     slot: CamSlot,
-  ): SurveillancePanel | CallWindow | VideoEffectsStudio | SilenceScene | undefined {
+  ): FeedHolder | undefined {
     if (slot === 'studio') {
       const e = scene.get('studio')
       return e instanceof VideoEffectsStudio ? e : undefined
@@ -1736,6 +2392,10 @@ export function createOSApp(
     if (slot === 'silence') {
       const e = scene.get('silence')
       return e instanceof SilenceScene ? e : undefined
+    }
+    if (slot === 'vr-vision') {
+      const e = scene.get('vr-vision')
+      return e instanceof VrVisionScene ? e : undefined
     }
     if (slot === 'call-self') {
       const e = scene.get('call')
@@ -1753,7 +2413,8 @@ export function createOSApp(
       holderFor('cam-a') ??
       holderFor('cam-b') ??
       holderFor('call-self') ??
-      holderFor('studio')
+      holderFor('studio') ??
+      holderFor('vr-vision')
     if (!holder) {
       if (feed instanceof VideoFeed) feed.dispose()
       return
@@ -1763,7 +2424,9 @@ export function createOSApp(
     if (
       feed instanceof VideoFeed &&
       visionOn &&
-      (holder instanceof SurveillancePanel || holder instanceof VideoEffectsStudio)
+      (holder instanceof SurveillancePanel ||
+        holder instanceof VideoEffectsStudio ||
+        holder instanceof VrVisionScene)
     ) {
       feed.vision = new VisionEngine()
     }
@@ -1799,6 +2462,17 @@ export function createOSApp(
     controller.logLine(`${galleryTargets.length} EXPEDIENTES CARGADOS EN LA GALERÍA`, 'ok')
   }
 
+  /**
+   * Filename stem for takes and stills:
+   * `<production>-<scene>-t03`. Twenty clips from five scenes used to be
+   * indistinguishable in the bin — this is what makes them sortable.
+   */
+  function takeStem(): string {
+    const title = slugify(ctx.config.movieTitle)
+    const sceneName = slugify(PHASE_LABELS[scene.phase])
+    return `${title}-${sceneName}-t${String(Math.max(take, 1)).padStart(2, '0')}`
+  }
+
   function setVision(on: boolean): void {
     visionOn = on
     for (const slot of ['cam-a', 'cam-b'] as const) {
@@ -1810,6 +2484,10 @@ export function createOSApp(
     const studioFeed = holderFor('studio')?.feed
     if (studioFeed instanceof VideoFeed) {
       studioFeed.vision = on ? (studioFeed.vision ?? new VisionEngine()) : null
+    }
+    const vrFeed = holderFor('vr-vision')?.feed
+    if (vrFeed instanceof VideoFeed) {
+      vrFeed.vision = on ? (vrFeed.vision ?? new VisionEngine()) : null
     }
     hooks.onVisionChange?.(on)
   }
@@ -1828,9 +2506,14 @@ export function createOSApp(
     restart: () => setPhase('boot'),
     reloadScene: () => setPhase(scene.phase),
     reloadMedia: () => {
+      // Forget the bins too, or restoreSlots / the wall would re-attach
+      // what the director just asked to drop.
+      slotSources.clear()
+      wall.clear()
       disposeSceneFeeds()
       setPhase(scene.phase)
     },
+    relayout: () => rebuildPhase(),
     resetTake: () => {
       // Back to a clean slate: take numbering restarts at TOMA 01.
       take = 0
@@ -1854,12 +2537,77 @@ export function createOSApp(
         ? cinematic.movieTitle
         : ctx.config.movieTitle
     },
-    loadVideoFile: (file, slot = 'cam-a') =>
-      swapFeed(slot, VideoFeed.fromFile(file)),
-    useWebcam: async (slot = 'cam-a') =>
-      swapFeed(slot, await VideoFeed.fromWebcam()),
-    clearFeed: (slot = 'cam-a') => swapFeed(slot, new StaticFeed()),
+    loadVideoFile: (file, slot = 'cam-a') => {
+      slotSources.set(slot, { kind: 'file', file, label: file.name })
+      swapFeed(slot, VideoFeed.fromFile(file))
+    },
+    useWebcam: async (slot = 'cam-a') => {
+      const feed = await VideoFeed.fromWebcam()
+      slotSources.set(slot, { kind: 'webcam', label: 'WEBCAM' })
+      swapFeed(slot, feed)
+    },
+    clearFeed: (slot = 'cam-a') => {
+      slotSources.delete(slot)
+      swapFeed(slot, new StaticFeed())
+    },
+    getSlots: () =>
+      (['cam-a', 'cam-b', 'call-self', 'studio', 'vr-vision', 'silence'] as const)
+        .filter((slot) => holderFor(slot))
+        .map((slot) => {
+          const source = slotSources.get(slot)
+          const live = holderFor(slot)?.feed
+          // The bin remembers intent; the holder tells us what's actually
+          // on screen (a restore can still be in flight).
+          if (!source || !(live instanceof VideoFeed)) {
+            return { slot, kind: 'none' as const, label: 'ESTÁTICO' }
+          }
+          return { slot, kind: source.kind, label: source.label }
+        }),
+    slotAtPoint: (clientX, clientY) => {
+      if (!canvasEl) return null
+      // Map viewport → canvas pixels; a letterboxed canvas is CSS-scaled,
+      // so the ratio matters (dropping on CAM-B must not hit CAM-A).
+      const rect = canvasEl.getBoundingClientRect()
+      if (rect.width < 1 || rect.height < 1) return null
+      const x = ((clientX - rect.left) / rect.width) * ctx.width
+      const y = ((clientY - rect.top) / rect.height) * ctx.height
+      if (x < 0 || y < 0 || x > ctx.width || y > ctx.height) return null
+      // Topmost first, so a raised window wins the drop.
+      const slots: CamSlot[] = [
+        'cam-a',
+        'cam-b',
+        'call-self',
+        'studio',
+        'vr-vision',
+        'silence',
+      ]
+      let best: { slot: CamSlot; z: number } | null = null
+      for (const slot of slots) {
+        const holder = holderFor(slot)
+        if (!holder) continue
+        // Full-screen holders (studio, silence) accept a drop anywhere.
+        const hit =
+          holder instanceof OSWindow ? holder.contains(x, y) : true
+        if (!hit) continue
+        const z = holder instanceof OSWindow ? holder.z : -1
+        if (!best || z >= best.z) best = { slot, z }
+      }
+      return best?.slot ?? null
+    },
     loadGalleryImages: (files) => loadGalleryImages(files),
+    loadWallVideos: (files) => loadWallVideos(files),
+    clearWallVideos: () => clearWallVideos(),
+    getWallState: () => wall.state(),
+    setWallPace: ({ holdSeconds, stagger }) => {
+      if (holdSeconds !== undefined) {
+        wall.holdSeconds = Math.max(0.5, Math.min(60, holdSeconds))
+      }
+      if (stagger !== undefined) wall.stagger = Math.max(0, Math.min(10, stagger))
+      // Re-arm so a new pace takes effect on this cut, not the next one —
+      // without re-dealing the bin, which would cut every screen at once.
+      wall.reschedule(ctx.t)
+    },
+    setWallScreens: (screens) => setWallScreens(screens),
     setStudioEffects: (patch) => {
       widgetById('studio', VideoEffectsStudio)?.patchEffects(patch)
     },
@@ -1882,12 +2630,79 @@ export function createOSApp(
           }
         : { ready: false, label: 'NO SIGNAL', currentTime: 0, duration: 0, paused: true }
     },
+    setVrFrameStyle: (style) => {
+      vrVisionState.settings.frameStyle = style
+      syncVrVisionScene()
+      saveVrVisionState(vrVisionState)
+    },
+    getVrFrameStyle: () => vrVisionState.settings.frameStyle,
+    setVrVisionSettings: (patch) => {
+      Object.assign(vrVisionState.settings, patch)
+      syncVrVisionScene()
+      saveVrVisionState(vrVisionState)
+    },
+    getVrVisionState: () => structuredClone(vrVisionState),
+    queueVrMessage: (text, tone = 'info', duration = 6) => {
+      const clean = text.trim().slice(0, 240)
+      if (!clean) return
+      vrVisionState.queue.push({
+        id: crypto.randomUUID(),
+        text: clean,
+        tone,
+        duration: Math.max(1, Math.min(30, duration)),
+        createdAt: Date.now(),
+      })
+      vrVisionState.queue = vrVisionState.queue.slice(-VR_HISTORY_LIMIT)
+      saveVrVisionState(vrVisionState)
+    },
+    sendVrMessage: (id) => {
+      const index = id
+        ? vrVisionState.queue.findIndex((message) => message.id === id)
+        : 0
+      if (index < 0 || vrVisionState.queue.length === 0) return
+      if (vrVisionState.active) vrVisionState.history.unshift(vrVisionState.active)
+      vrVisionState.active = vrVisionState.queue.splice(index, 1)[0]
+      vrVisionState.history = vrVisionState.history.slice(0, VR_HISTORY_LIMIT)
+      vrMessageStartedAt = ctx.t
+      syncVrVisionScene()
+      saveVrVisionState(vrVisionState)
+    },
+    dismissVrMessage: () => {
+      if (!vrVisionState.active) return
+      vrVisionState.history.unshift(vrVisionState.active)
+      vrVisionState.history = vrVisionState.history.slice(0, VR_HISTORY_LIMIT)
+      vrVisionState.active = null
+      syncVrVisionScene()
+      saveVrVisionState(vrVisionState)
+    },
+    removeVrMessage: (id) => {
+      vrVisionState.queue = vrVisionState.queue.filter((message) => message.id !== id)
+      saveVrVisionState(vrVisionState)
+    },
+    replayVrMessage: (id) => {
+      const message = vrVisionState.history.find((entry) => entry.id === id)
+      if (!message) return
+      vrVisionState.queue.unshift({
+        ...message,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+      })
+      saveVrVisionState(vrVisionState)
+    },
+    clearVrHistory: () => {
+      vrVisionState.history = []
+      saveVrVisionState(vrVisionState)
+    },
     setVision: (on) => setVision(on),
     isVisionOn: () => visionOn,
     setCrt: (patch) => {
       Object.assign(ctx.config.crt, patch)
     },
     getCrt: () => ({ ...ctx.config.crt }),
+    resetCrt: () => {
+      Object.assign(ctx.config.crt, CONFIG.crt)
+      return { ...ctx.config.crt }
+    },
     glitchBurst: (seconds = 0.7) => {
       glitchBurstUntil = ctx.t + seconds
     },
@@ -1902,24 +2717,70 @@ export function createOSApp(
       if (e instanceof StatusBar) e.announce(text, seconds)
     },
     trigger: (action) => runAction(action),
+    getSceneState: () => sceneStateSnapshot(),
+    setGeoLocation: (lat, lon, label) => {
+      const geo = widgetById('geo', GeoMapWindow)
+      if (!geo) return
+      const name = geo.setLocation(lat, lon, label)
+      controller.logLine(`ENLACE REPOSICIONADO — OP. ${name}`, 'info')
+    },
     screenshot: () => {
       canvasEl?.toBlob((blob) => {
         if (!blob) return
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
-        a.download = `os-foto-${timestampSlug()}.png`
+        a.download = `${takeStem()}-foto-${timestampSlug()}.png`
         a.click()
         setTimeout(() => URL.revokeObjectURL(a.href), 5000)
       }, 'image/png')
     },
+    setCaptureFormat: (format) => setCaptureFormat(format),
+    setCaptureContainer: (container) => {
+      captureContainer = container
+    },
+    setAudioCapture: async (on) => {
+      if (!on) {
+        for (const track of micStream?.getTracks() ?? []) track.stop()
+        micStream = null
+        return
+      }
+      if (micStream) return
+      // Let the rejection reach the panel so it can surface a note.
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    },
+    setAutoDownload: (on) => {
+      autoDownload = on
+    },
+    getCaptureState: () => ({
+      format: captureFormat,
+      width: canvasEl?.width ?? ctx.width,
+      height: canvasEl?.height ?? ctx.height,
+      container: captureContainer,
+      effectiveContainer: CanvasRecorder.resolveContainer(captureContainer),
+      audio: micStream !== null,
+      autoDownload,
+    }),
     startRecording: () => {
       if (!canvasEl || recorder.recording) return
       take++
-      scene.add(new Slate(take), ctx)
-      recorder.start(canvasEl, 60, `os-toma-${String(take).padStart(2, '0')}`)
+      // Slate carries the scene name so the clip is identifiable on sight.
+      scene.add(new Slate(take, PHASE_LABELS[scene.phase]), ctx)
+      recorder.start({
+        canvas: canvasEl,
+        fps: 60,
+        baseName: takeStem(),
+        container: captureContainer,
+        audio: micStream,
+        autoDownload,
+      })
     },
     stopRecording: () => recorder.stop(),
     isRecording: () => recorder.recording,
+    getHealth: () => ({
+      frame: clockFrame,
+      mode: clockMode,
+      drawn: framesDrawn,
+    }),
     getTake: () => take,
     destroy: () => {
       destroyed = true
@@ -1927,6 +2788,8 @@ export function createOSApp(
       disposeSceneFeeds()
       disposeGalleryTargets()
       recorder.stop()
+      for (const track of micStream?.getTracks() ?? []) track.stop()
+      micStream = null
       instance.remove()
     },
   }
@@ -1938,11 +2801,11 @@ export function createOSApp(
     ;(window as unknown as { __os: OSController }).__os = controller
     ;(window as unknown as { __osDebug: object }).__osDebug = {
       visionStatus: (slot: CamSlot = 'cam-a') => {
-        const f = panelFor(slot)?.feed
+        const f = holderFor(slot)?.feed
         return f instanceof VideoFeed ? (f.vision?.status ?? null) : null
       },
       tracks: (slot: CamSlot = 'cam-a') => {
-        const f = panelFor(slot)?.feed
+        const f = holderFor(slot)?.feed
         return f instanceof VideoFeed ? (f.vision?.tracks ?? null) : null
       },
       windows: () =>
@@ -1957,6 +2820,26 @@ export function createOSApp(
           })),
           clock: () => controller.getClock(),
           phase: () => controller.getPhase(),
+          health: () => controller.getHealth(),
+          // Feed elements are never in the DOM, so transport behaviour
+          // isn't observable via querySelector — expose it here.
+          feeds: () =>
+            sceneFeeds().map((f) => ({
+              label: f.label,
+              ready: f.ready,
+              paused: f.paused,
+              currentTime: f.currentTime,
+              rate: f.element.playbackRate,
+            })),
+          capture: () => controller.getCaptureState(),
+          sceneState: () => controller.getSceneState(),
+          vrVision: () => controller.getVrVisionState(),
+          toggleSilence: () => widgetById('silence', SilenceScene)?.click(ctx),
+          slots: () => controller.getSlots(),
+          canRecord: () => ({
+            mp4: canRecord('mp4'),
+            webm: canRecord('webm'),
+          }),
     }
   }
 

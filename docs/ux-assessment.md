@@ -1,5 +1,13 @@
 # UX Assessment — PANOPTICON OS as a filmmaking tool
 
+> **Status: executed (2026-08-11).** Every P0–P2 finding below has been
+> implemented, plus most of P3. See the per-item status markers, the
+> summary in the README's "Filmmaker workflow pass", and
+> [`director-guide.md`](director-guide.md) for the resulting workflow.
+> `scripts/verify-director.mjs` guards the take-protection rules.
+> This document is kept as the reasoning record, in the state it was
+> written, with outcomes appended.
+
 **Date:** 2026-08-10 · **Reviewer:** Claude (UX consultant pass)
 **Scope:** the film creator's experience: staging scenes, directing cues,
 recording takes, and getting usable footage into an edit. Grounded in the
@@ -200,3 +208,34 @@ Waves 1–2 are small, self-contained edits in `ControlPanel.tsx`,
 `OSApp.ts`, `Recorder.ts`, `Slate.ts`, `App.tsx`. Wave 3 touches the
 render/capture path and deserves its own testing pass (extend
 `verify-rec.mjs` to assert resolution + container).
+
+---
+
+## Execution record (2026-08-11)
+
+All five waves shipped in one pass. What each finding became:
+
+| Finding | Outcome |
+|---|---|
+| P0-1 nothing guarded while rolling | Scene / RECARGA / REINICIAR dim (`.ctrl-guarded`) and need a second confirming click while `recording`; armed state is amber and expires after 4 s. Cues, ambience, theme and message injection deliberately stay instant. |
+| P0-2 resize rebuilds mid-take | `syncSize()` returns early while `recorder.recording`. Fixed formats are immune by construction. Asserted by `verify-director`. |
+| P0-3 fragile takes | Review-first flow; list holds 8 takes and never evicts a circled one; `beforeunload` guard when rolling or takes are unsaved. *Not done:* OPFS/IndexedDB persistence — the unload guard covers the realistic loss case at a fraction of the complexity. |
+| P0-4 Ctrl+R loaded gun | Refused while rolling (flashes a note); `beforeunload` covers the browser-reload path. |
+| P1-1 record→auto-download | Inverted: takes land in the list, `VER` plays inline, `◎ BUENA` circles + saves, `NG` discards. `AUTO-GUARDA` restores the old behaviour as an opt-in. |
+| P1-2 no scene identity | `PHASE_LABELS` + `slugify()` in SceneManager feed both the filename (`<production>-<scene>-t##-<timestamp>`) and the slate, which now shows production title and scene name. |
+| P1-3 resolution varies | `CaptureFormat` (`window`/1080p/1440p/4K/9:16) pins the canvas; CSS letterboxes via a `fixed` class; `pixelDensity(1)` keeps the backing store exact. Panel shows real `w×h`. |
+| P1-4 WebM only, no audio | MP4/H.264 preferred with WebM fallback (`canRecord`, `resolveContainer`); optional mic track muxed into the take. |
+| P1-5 media dies on scene change | Session media bin (`slotSources`) + `restoreSlots()` on every phase build; `getSlots()` drives the `CARGADO` readout; per-slot clear replaces global LIMPIAR. |
+| P1-6 transport ignored footage | `syncFeedsToClock()` runs centrally in the draw loop for every feed; the FX studio's private copy was removed. |
+| P2-1 mode cues showed no state | `getSceneState()` snapshot + `Cue.active` predicates; plus an `ESTADO` readout row. |
+| P2-2 cues mouse-only | Bare `1`–`9` fire the current scene's cues; digits printed on the buttons; `?` cheat sheet. |
+| P2-3 one long stack | Five collapsible sections (CAPTURA / MEDIA / LOOK / INYECTAR / SISTEMA) with summaries when closed and persisted state. |
+| P2-4 no undo | `RESET LOOK` (restores `CONFIG.crt`) and `ORDENAR VENTANAS` (`relayout()`, keeps footage). |
+| P2-5 nothing persists | `localStorage` prefs: sections, format, container, auto-download, count-in, CRT, theme, title. *Not done:* preset export/import files. |
+| P2-6 drops always hit CAM-A | `slotAtPoint()` hit-tests the drop against feed windows (topmost wins); image drops route to the gallery. |
+| P3 watchdog | `getHealth()` + a 1.2 s poll in `App.tsx` → `LIENZO CONGELADO` banner. |
+| P3 GEO inputs | `UBICAR` lat/lon + operation name (`setGeoLocation`), joins the CIUDAD cycle; zoom/city/follow surfaced in `ESTADO`. |
+| P3 slider readouts, count-in, dim text, per-slot clear | All done (values on CRT sliders, 3/5/10 s count-in, hint opacity 0.45→0.6, `⨯A`/`⨯B`). |
+
+Deliberately deferred: OPFS take persistence (P0-3), preset
+export/import (P2-5). Both are additive and neither blocks a shoot.

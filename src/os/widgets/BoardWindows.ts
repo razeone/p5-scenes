@@ -132,6 +132,11 @@ export class MotherboardWindow extends OSWindow {
     return this.xray
   }
 
+  /** X-ray state, so the director panel can light its cue button. */
+  get xrayOn(): boolean {
+    return this.xray
+  }
+
   /** Short-circuit on a random installed component. */
   shortCircuit(): void {
     this.pendingFault = true
